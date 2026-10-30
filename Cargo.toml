@@ -1,0 +1,59 @@
+[package]
+name = "rusty-dragon"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "A UCI chess engine written in Rust."
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+
+[dev-dependencies]
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+unused_qualifications = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+
+# Every `unsafe` block needs a `// SAFETY:` comment.
+undocumented_unsafe_blocks = "deny"
+multiple_unsafe_ops_per_block = "warn"
+
+# Ban debugging leftovers and sloppy error handling in committed code.
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+print_stderr = "warn"
+unwrap_used = "warn"
+expect_used = "allow"
+
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+
+[profile.dev]
+opt-level = 1
+overflow-checks = true
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = false
+
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = false
+
+[profile.release-checked]
+inherits = "release"
+debug-assertions = true
+overflow-checks = true

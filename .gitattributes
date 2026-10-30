@@ -1,0 +1,9 @@
+* text=auto eol=lf
+
+*.rs    text eol=lf diff=rust
+*.toml  text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.ps1   text eol=lf
+
+Cargo.lock linguist-generated=true
