@@ -1,3 +1,9 @@
+use std::error::Error;
+use std::fmt;
+use std::str::FromStr;
+
+use super::{File, Rank};
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(u8)]
 #[must_use]
@@ -27,14 +33,68 @@ impl Square {
     ];
 
     #[inline]
-    pub const fn from_index(i: u8) -> Self {
-        Self::ALL[i as usize]
+    pub const fn from_index(i: usize) -> Self {
+        Self::ALL[i]
+    }
+
+    #[inline]
+    pub const fn from_file_rank(file: File, rank: Rank) -> Self {
+        Self::from_index(rank.index() * 8 + file.index())
     }
 
     #[inline]
     #[must_use]
-    pub const fn index(self) -> u8 {
-        self as u8
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+
+    #[inline]
+    pub const fn file(self) -> File {
+        File::from_index(self.index() % 8)
+    }
+
+    #[inline]
+    pub const fn rank(self) -> Rank {
+        Rank::from_index(self.index() / 8)
+    }
+}
+
+impl fmt::Display for Square {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}{}", self.file().to_char(), self.rank().to_char())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ParseSquareError {
+    Length(usize),
+    File(char),
+    Rank(char),
+}
+
+impl fmt::Display for ParseSquareError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Length(n) => write!(f, "expected 2 characters, got {n}"),
+            Self::File(c) => write!(f, "invalid file {c:?}, expected a-h"),
+            Self::Rank(c) => write!(f, "invalid rank {c:?}, expected 1-8"),
+        }
+    }
+}
+
+impl Error for ParseSquareError {}
+
+impl FromStr for Square {
+    type Err = ParseSquareError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut chars = s.chars();
+        let (Some(f), Some(r), None) = (chars.next(), chars.next(), chars.next()) else {
+            return Err(ParseSquareError::Length(s.chars().count()));
+        };
+        let file = File::from_char(f).ok_or(ParseSquareError::File(f))?;
+        let rank = Rank::from_char(r).ok_or(ParseSquareError::Rank(r))?;
+        Ok(Self::from_file_rank(file, rank))
     }
 }
 
@@ -45,7 +105,7 @@ mod tests {
     #[test]
     fn from_index_matches_discriminant() {
         for i in 0..64 {
-            assert_eq!(Square::from_index(i) as u8, i);
+            assert_eq!(Square::from_index(i).index(), i);
         }
     }
 
@@ -53,5 +113,41 @@ mod tests {
     #[should_panic(expected = "index out of bounds")]
     fn from_index_out_of_range_panics() {
         let _ = Square::from_index(64);
+    }
+
+    #[test]
+    fn file_rank_round_trip() {
+        for file in File::ALL {
+            for rank in Rank::ALL {
+                let sq = Square::from_file_rank(file, rank);
+                assert_eq!(sq.file(), file);
+                assert_eq!(sq.rank(), rank);
+            }
+        }
+    }
+
+    #[test]
+    fn file_and_rank_of_known_square() {
+        assert_eq!(Square::E4.file(), File::E);
+        assert_eq!(Square::E4.rank(), Rank::R4);
+    }
+
+    #[test]
+    fn display_and_parse_round_trip() {
+        for sq in Square::ALL {
+            assert_eq!(sq.to_string().parse::<Square>(), Ok(sq));
+        }
+    }
+
+    #[test]
+    fn parse_rejects_bad_input() {
+        assert_eq!("".parse::<Square>(), Err(ParseSquareError::Length(0)));
+        assert_eq!("e".parse::<Square>(), Err(ParseSquareError::Length(1)));
+        assert_eq!("e44".parse::<Square>(), Err(ParseSquareError::Length(3)));
+        assert_eq!("ę4".parse::<Square>(), Err(ParseSquareError::File('ę')));
+        assert_eq!("i4".parse::<Square>(), Err(ParseSquareError::File('i')));
+        assert_eq!("A4".parse::<Square>(), Err(ParseSquareError::File('A')));
+        assert_eq!("4e".parse::<Square>(), Err(ParseSquareError::File('4')));
+        assert_eq!("e9".parse::<Square>(), Err(ParseSquareError::Rank('9')));
     }
 }

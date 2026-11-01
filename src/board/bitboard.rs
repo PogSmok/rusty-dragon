@@ -100,9 +100,12 @@ impl Bitboard {
     /// Lowest set square or `None` if self is empty
     #[inline]
     #[must_use]
-    #[expect(clippy::cast_possible_truncation, reason = "trailing_zeros of a non-zero u64 is < 64")]
     pub const fn lsb(self) -> Option<Square> {
-        if self.is_empty() { None } else { Some(Square::from_index(self.0.trailing_zeros() as u8)) }
+        if self.is_empty() {
+            None
+        } else {
+            Some(Square::from_index(self.0.trailing_zeros() as usize))
+        }
     }
 
     /// Removes and returns the lowest set square
@@ -238,9 +241,9 @@ impl fmt::Debug for Bitboard {
 /// Prints an 8x8 grid with rank 8 at the top, `X` for set squares.
 impl fmt::Display for Bitboard {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for rank in (0..8u8).rev() {
+        for rank in (0..8).rev() {
             write!(f, "{} ", rank + 1)?;
-            for file in 0..8u8 {
+            for file in 0..8 {
                 let square = Square::from_index(rank * 8 + file);
                 let c = if self.contains(square) { 'X' } else { '.' };
                 write!(f, " {c}")?;
