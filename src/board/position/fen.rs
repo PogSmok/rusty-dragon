@@ -10,7 +10,7 @@ use crate::board::{
 /// Error returned when parsing a FEN string.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum FenError {
-    /// Expected 6 space-separated fields.
+    /// Expected 6 space-separated fields, or 4 with the move counters left out.
     FieldCount(usize),
     /// Expected 8 ranks separated by '/'.
     RankCount(usize),
@@ -32,12 +32,14 @@ pub enum FenError {
     Kings,
     /// A pawn on rank 1 or 8.
     PawnRank,
+    /// The side not to move is in check, so the last move left its own king attacked.
+    OpponentInCheck,
 }
 
 impl fmt::Display for FenError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::FieldCount(n) => write!(f, "expected 6 fields, got {n}"),
+            Self::FieldCount(n) => write!(f, "expected 4 or 6 fields, got {n}"),
             Self::RankCount(n) => write!(f, "expected 8 ranks, got {n}"),
             Self::RankLength(n) => write!(f, "rank describes {n} squares, expected 8"),
             Self::Piece(c) => write!(f, "invalid piece {c:?}, expected one of \"PNBRQKpnbrqk\""),
@@ -52,6 +54,7 @@ impl fmt::Display for FenError {
             Self::Clock(s) => write!(f, "invalid move counter {s:?}"),
             Self::Kings => write!(f, "each side must have exactly one king"),
             Self::PawnRank => write!(f, "pawns cannot be on rank 1 or 8"),
+            Self::OpponentInCheck => write!(f, "the side not to move is in check"),
         }
     }
 }
@@ -65,12 +68,6 @@ impl Error for FenError {
     }
 }
 
-impl From<ParseSquareError> for FenError {
-    fn from(e: ParseSquareError) -> Self {
-        Self::EnPassant(e)
-    }
-}
-
 impl Position {
     pub const STARTPOS_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -78,10 +75,19 @@ impl Position {
         Self::from_fen(Self::STARTPOS_FEN).expect("STARTPOS_FEN is valid")
     }
 
+    /// Parses a FEN string. The halfmove clock and fullmove number may be left out, in which
+    /// case they default to `0` and `1`. EPD operations after the first four fields (`bm`,
+    /// `id`, ...) are not accepted and must be stripped by the caller.
     pub fn from_fen(fen: &str) -> Result<Self, FenError> {
         let fields: Vec<&str> = fen.split_whitespace().collect();
-        let &[placement, side, castling, en_passant, halfmove, fullmove] = fields.as_slice() else {
-            return Err(FenError::FieldCount(fields.len()));
+        let (placement, side, castling, en_passant, halfmove, fullmove) = match *fields {
+            [placement, side, castling, en_passant] => {
+                (placement, side, castling, en_passant, "0", "1")
+            }
+            [placement, side, castling, en_passant, halfmove, fullmove] => {
+                (placement, side, castling, en_passant, halfmove, fullmove)
+            }
+            _ => return Err(FenError::FieldCount(fields.len())),
         };
 
         let mut pos = Self::EMPTY;
@@ -96,11 +102,16 @@ impl Position {
         pos.castling_rights = parse_castling(castling)?;
         pos.en_passant = match en_passant {
             "-" => None,
-            square => Some(pos.validate_en_passant(square.parse()?)?),
+            square => {
+                let square = square.parse().map_err(FenError::EnPassant)?;
+                Some(pos.validate_en_passant(square)?)
+            }
         };
         pos.halfmove_clock = parse_clock(halfmove)?;
-        pos.fullmove_number = parse_clock(fullmove)?;
+        pos.fullmove_number = parse_fullmove(fullmove)?;
 
+        // Last, so a malformed field is reported before a problem with the position itself.
+        pos.validate_opponent_not_in_check()?;
         Ok(pos)
     }
 
@@ -181,6 +192,14 @@ impl Position {
         Ok(())
     }
 
+    /// Rejects positions where the side to move could capture the opponent's king.
+    /// Needs `validate_pieces` first, so each side has exactly one king.
+    fn validate_opponent_not_in_check(&self) -> Result<(), FenError> {
+        let us = self.side_to_move;
+        let their_king = self.pieces(us.opposite(), PieceKind::King).lsb().expect("one king");
+        if self.is_attacked(their_king, us) { Err(FenError::OpponentInCheck) } else { Ok(()) }
+    }
+
     /// Checks that `square` is where the side to move could capture en passant
     fn validate_en_passant(&self, square: Square) -> Result<Square, FenError> {
         let target = Bitboard::from_square(square);
@@ -222,8 +241,21 @@ fn parse_castling(field: &str) -> Result<CastlingRights, FenError> {
     Ok(rights)
 }
 
+/// Parses a move counter
 fn parse_clock(field: &str) -> Result<u16, FenError> {
-    field.parse().map_err(|_| FenError::Clock(field.to_string()))
+    let error = || FenError::Clock(field.to_string());
+    if !field.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(error());
+    }
+    field.parse().map_err(|_| error())
+}
+
+/// Parses the fullmove number, which starts at 1.
+fn parse_fullmove(field: &str) -> Result<u16, FenError> {
+    match parse_clock(field)? {
+        0 => Err(FenError::Clock(field.to_string())),
+        n => Ok(n),
+    }
 }
 
 impl FromStr for Position {
@@ -282,8 +314,18 @@ mod tests {
     }
 
     #[test]
+    fn move_counters_are_optional() {
+        let pos = Position::from_fen("4k3/8/8/8/8/8/8/4K3 b - -").expect("valid 4-field FEN");
+        assert_eq!(pos.side_to_move(), Color::Black);
+        assert_eq!(pos.halfmove_clock(), 0);
+        assert_eq!(pos.fullmove_number(), 1);
+        assert_eq!(pos.to_fen(), "4k3/8/8/8/8/8/8/4K3 b - - 0 1");
+    }
+
+    #[test]
     fn rejects_bad_structure() {
-        assert_eq!(fen_error("8/8/8/8/8/8/8/8 w - -"), FenError::FieldCount(4));
+        assert_eq!(fen_error("4k3/8/8/8/8/8/8/4K3 w -"), FenError::FieldCount(3));
+        assert_eq!(fen_error("4k3/8/8/8/8/8/8/4K3 w - - 0"), FenError::FieldCount(5));
         assert_eq!(fen_error("4k3/8/8/8/8/8/8 w - - 0 1"), FenError::RankCount(7));
         assert_eq!(fen_error("4k3/8/8/8/8/8/8/4K2 w - - 0 1"), FenError::RankLength(7));
         assert_eq!(fen_error("4k3/8/8/8/8/8/8/4K4 w - - 0 1"), FenError::RankLength(9));
@@ -301,6 +343,10 @@ mod tests {
         );
         assert_eq!(fen_error("4k3/8/8/8/8/8/8/4K3 w - - x 1"), FenError::Clock("x".into()));
         assert_eq!(fen_error("4k3/8/8/8/8/8/8/4K3 w - - 0 -1"), FenError::Clock("-1".into()));
+        assert_eq!(fen_error("4k3/8/8/8/8/8/8/4K3 w - - +5 1"), FenError::Clock("+5".into()));
+        assert_eq!(fen_error("4k3/8/8/8/8/8/8/4K3 w - - 0 +1"), FenError::Clock("+1".into()));
+        assert_eq!(fen_error("4k3/8/8/8/8/8/8/4K3 w - - 0 0"), FenError::Clock("0".into()));
+        assert_eq!(fen_error("4k3/8/8/8/8/8/8/4K3 w - - 65536 1"), FenError::Clock("65536".into()));
     }
 
     #[test]
@@ -353,5 +399,26 @@ mod tests {
         assert_eq!(fen_error("4k3/8/8/8/8/8/8/4KK2 w - - 0 1"), FenError::Kings);
         assert_eq!(fen_error("4k3/8/8/8/8/8/8/P3K3 w - - 0 1"), FenError::PawnRank);
         assert_eq!(fen_error("p3k3/8/8/8/8/8/8/4K3 w - - 0 1"), FenError::PawnRank);
+    }
+
+    #[test]
+    fn rejects_side_not_to_move_in_check() {
+        // White to move with the black king attacked by the rook on e1.
+        assert_eq!(fen_error("4k3/8/8/8/8/8/8/4R1K1 w - - 0 1"), FenError::OpponentInCheck);
+        // Pawn attacks are checked in the right direction for each color.
+        assert_eq!(fen_error("4k3/3P4/8/8/8/8/8/4K3 w - - 0 1"), FenError::OpponentInCheck);
+        assert_eq!(fen_error("4k3/8/8/8/8/8/3p4/4K3 b - - 0 1"), FenError::OpponentInCheck);
+        // The side to move being in check is a normal position.
+        assert!(Position::from_fen("4k3/8/8/8/8/8/8/4R1K1 b - - 0 1").is_ok());
+        assert!(Position::from_fen("4k3/3P4/8/8/8/8/8/4K3 b - - 0 1").is_ok());
+    }
+
+    #[test]
+    fn malformed_fields_are_reported_before_check() {
+        assert_eq!(
+            fen_error("4k3/8/8/8/8/8/8/4R1K1 w XYZ - 0 1"),
+            FenError::Castling("XYZ".into())
+        );
+        assert_eq!(fen_error("4k3/8/8/8/8/8/8/4R1K1 w - - 0 x"), FenError::Clock("x".into()));
     }
 }

@@ -1,13 +1,16 @@
 use std::fmt;
 
-use super::{Bitboard, CastlingRights, Color, Piece, PieceKind, Square};
+use super::{
+    Bitboard, CastlingRights, Color, File, Piece, PieceKind, Rank, Square, bishop_attacks,
+    king_attacks, knight_attacks, pawn_attacks, rook_attacks,
+};
 
 mod fen;
 
 pub use fen::FenError;
 
-/// Full game state
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+/// Full game state.
+#[derive(Clone, PartialEq, Eq, Debug)]
 #[must_use]
 pub struct Position {
     /// Squares occupied by each piece kind (both colors), indexed by `PieceKind`.
@@ -29,7 +32,7 @@ pub struct Position {
 
 impl Position {
     /// No pieces, White to move, no castling rights, move 1.
-    pub const EMPTY: Self = Self {
+    const EMPTY: Self = Self {
         by_kind: [Bitboard::EMPTY; 6],
         by_color: [Bitboard::EMPTY; 2],
         board_mailbox: [None; 64],
@@ -53,7 +56,7 @@ impl Position {
         self.by_kind[piece.kind().index()] |= bb;
         self.board_mailbox[square.index()] = Some(piece);
 
-        self.debug_check();
+        self.debug_check_square(square);
     }
 
     /// Removes and returns the piece on `square`, or `None` if it is empty.
@@ -66,7 +69,7 @@ impl Position {
         self.by_color[piece.color().index()] &= bb;
         self.by_kind[piece.kind().index()] &= bb;
 
-        self.debug_check();
+        self.debug_check_square(square);
         Some(piece)
     }
 
@@ -82,40 +85,54 @@ impl Position {
         self.by_kind[piece.kind().index()] ^= mask;
         self.board_mailbox[to.index()] = Some(piece);
 
-        self.debug_check();
+        self.debug_check_square(from);
+        self.debug_check_square(to);
     }
 
     #[inline]
-    fn debug_check(&self) {
+    fn debug_check_square(&self, square: Square) {
         if cfg!(debug_assertions) {
-            self.assert_consistent();
+            self.assert_square_consistent(square);
         }
     }
 
-    /// Panics if the bitboards and the mailbox disagree.
+    /// Panics if the bitboards and the mailbox disagree about `square`.
+    fn assert_square_consistent(&self, square: Square) {
+        let colors = self.by_color.iter().filter(|bb| bb.contains(square)).count();
+        let kinds = self.by_kind.iter().filter(|bb| bb.contains(square)).count();
+        if let Some(piece) = self.board_mailbox[square.index()] {
+            let matches = self.pieces(piece.color(), piece.kind()).contains(square);
+            assert!(
+                colors == 1 && kinds == 1 && matches,
+                "{square}: mailbox has {piece:?}, bitboards don't"
+            );
+        } else {
+            assert!(colors == 0 && kinds == 0, "{square}: mailbox is empty, bitboards aren't");
+        }
+    }
+
+    /// Panics if the bitboards and the mailbox disagree anywhere on the board.
+    #[cfg_attr(not(test), expect(dead_code, reason = "only used by tests"))]
     fn assert_consistent(&self) {
-        let [white, black] = self.by_color;
-        assert!((white & black).is_empty(), "a square is both white and black");
-
-        let mut all_kinds = Bitboard::EMPTY;
-        for kind in self.by_kind {
-            assert!((all_kinds & kind).is_empty(), "a square has two piece kinds");
-            all_kinds |= kind;
-        }
-        assert_eq!(all_kinds, white | black, "kind and color bitboards cover different squares");
-
         for square in Square::ALL {
-            match self.board_mailbox[square.index()] {
-                Some(piece) => assert!(
-                    self.pieces(piece.color(), piece.kind()).contains(square),
-                    "{square}: mailbox has {piece:?}, bitboards don't"
-                ),
-                None => assert!(
-                    !self.occupied().contains(square),
-                    "{square}: mailbox is empty, bitboards aren't"
-                ),
-            }
+            self.assert_square_consistent(square);
         }
+    }
+
+    /// Whether any piece of color `by` attacks `square`.
+    #[must_use]
+    pub fn is_attacked(&self, square: Square, by: Color) -> bool {
+        let occupied = self.occupied();
+        let queens = self.pieces(by, PieceKind::Queen);
+        let diagonal = self.pieces(by, PieceKind::Bishop) | queens;
+        let straight = self.pieces(by, PieceKind::Rook) | queens;
+        // A pawn `by` attacks `square` iff pawn of opposite color on `square` attacks it back
+        let attackers = (pawn_attacks(by.opposite(), square) & self.pieces(by, PieceKind::Pawn))
+            | (knight_attacks(square) & self.pieces(by, PieceKind::Knight))
+            | (king_attacks(square) & self.pieces(by, PieceKind::King))
+            | (bishop_attacks(square, occupied) & diagonal)
+            | (rook_attacks(square, occupied) & straight);
+        !attackers.is_empty()
     }
 
     #[inline]
@@ -126,7 +143,7 @@ impl Position {
 
     #[inline]
     pub const fn pieces(&self, color: Color, kind: PieceKind) -> Bitboard {
-        Bitboard(self.by_color[color.index()].0 & self.by_kind[kind.index()].0)
+        self.by_color[color.index()].intersection(self.by_kind[kind.index()])
     }
 
     #[inline]
@@ -142,7 +159,7 @@ impl Position {
 
     #[inline]
     pub const fn occupied(&self) -> Bitboard {
-        Bitboard(self.by_color[Color::White.index()].0 | self.by_color[Color::Black.index()].0)
+        self.by_color[Color::White.index()].union(self.by_color[Color::Black.index()])
     }
 
     #[inline]
@@ -177,16 +194,16 @@ impl Position {
 /// Prints the board with rank 8 at the top, FEN letters for pieces and `.` for empty squares.
 impl fmt::Display for Position {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for rank in (0..8).rev() {
-            write!(f, "{} ", rank + 1)?;
-            for file in 0..8 {
-                let square = Square::from_index(rank * 8 + file);
-                let c = self.piece_at(square).map_or('.', Piece::to_char);
+        for rank in Rank::ALL.into_iter().rev() {
+            write!(f, "{} ", rank.to_char())?;
+            for file in File::ALL {
+                let c =
+                    self.piece_at(Square::from_file_rank(file, rank)).map_or('.', Piece::to_char);
                 write!(f, " {c}")?;
             }
             writeln!(f)?;
         }
-        write!(f, "   a b c d e f g h")
+        f.write_str("   a b c d e f g h")
     }
 }
 
@@ -265,6 +282,44 @@ mod tests {
         pos.by_kind[PieceKind::Queen.index()] = Bitboard::from_square(Square::D1);
         pos.by_color[Color::White.index()] = Bitboard::from_square(Square::D1);
         pos.assert_consistent();
+    }
+
+    #[test]
+    fn is_attacked_by_each_piece_kind() {
+        use Square::*;
+        let with = |pieces: &[(Square, Piece)]| {
+            let mut pos = Position::EMPTY;
+            for &(square, piece) in pieces {
+                pos.put_piece(square, piece);
+            }
+            pos
+        };
+        let attacked = |pos: &Position, square| pos.is_attacked(square, Color::White);
+
+        let pos = with(&[(E4, Piece::WhitePawn)]);
+        assert!(attacked(&pos, D5) && attacked(&pos, F5));
+        assert!(!attacked(&pos, E5) && !attacked(&pos, D3));
+        assert!(!pos.is_attacked(D5, Color::Black));
+
+        let pos = with(&[(E5, Piece::BlackPawn)]);
+        assert!(pos.is_attacked(D4, Color::Black) && pos.is_attacked(F4, Color::Black));
+        assert!(!pos.is_attacked(D6, Color::Black));
+
+        let pos = with(&[(B1, Piece::WhiteKnight)]);
+        assert!(attacked(&pos, C3) && !attacked(&pos, B3));
+
+        let pos = with(&[(E1, Piece::WhiteKing)]);
+        assert!(attacked(&pos, D2) && !attacked(&pos, E3));
+
+        let pos = with(&[(A8, Piece::WhiteRook)]);
+        assert!(attacked(&pos, F8) && !attacked(&pos, B7));
+
+        let pos = with(&[(D1, Piece::WhiteQueen)]);
+        assert!(attacked(&pos, D8) && attacked(&pos, H5) && !attacked(&pos, E3));
+
+        let pos = with(&[(H1, Piece::WhiteBishop), (F3, Piece::BlackKnight)]);
+        assert!(attacked(&pos, F3));
+        assert!(!attacked(&pos, E4));
     }
 
     #[test]
