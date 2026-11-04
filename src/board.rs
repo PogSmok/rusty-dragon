@@ -1,5 +1,6 @@
 //! Board representation.
 
+mod attacks;
 mod bitboard;
 mod castling_rights;
 mod color;
@@ -10,6 +11,9 @@ mod position;
 mod rank;
 mod square;
 
+pub use attacks::{
+    bishop_attacks, king_attacks, knight_attacks, pawn_attacks, queen_attacks, rook_attacks,
+};
 pub use bitboard::{Bitboard, BitboardIter};
 pub use castling_rights::CastlingRights;
 pub use color::Color;

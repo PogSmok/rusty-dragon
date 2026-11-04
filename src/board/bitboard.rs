@@ -88,6 +88,22 @@ impl Bitboard {
     }
 
     #[inline]
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    #[inline]
+    pub const fn intersection(self, other: Self) -> Self {
+        Self(self.0 & other.0)
+    }
+
+    /// Squares in `self` that are not in `other`.
+    #[inline]
+    pub const fn difference(self, other: Self) -> Self {
+        Self(self.0 & !other.0)
+    }
+
+    #[inline]
     pub const fn with_square(self, square: Square) -> Self {
         Self(self.0 | Self::from_square(square).0)
     }
@@ -199,6 +215,12 @@ impl IntoIterator for Bitboard {
     }
 }
 
+impl FromIterator<Square> for Bitboard {
+    fn from_iter<I: IntoIterator<Item = Square>>(squares: I) -> Self {
+        squares.into_iter().fold(Self::EMPTY, Self::with_square)
+    }
+}
+
 macro_rules! impl_bit_op {
     ($trait:ident, $fn:ident, $assign_trait:ident, $assign_fn:ident, $op:tt) => {
         impl $trait for Bitboard {
@@ -241,16 +263,15 @@ impl fmt::Debug for Bitboard {
 /// Prints an 8x8 grid with rank 8 at the top, `X` for set squares.
 impl fmt::Display for Bitboard {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for rank in (0..8).rev() {
-            write!(f, "{} ", rank + 1)?;
-            for file in 0..8 {
-                let square = Square::from_index(rank * 8 + file);
-                let c = if self.contains(square) { 'X' } else { '.' };
+        for rank in Rank::ALL.into_iter().rev() {
+            write!(f, "{} ", rank.to_char())?;
+            for file in File::ALL {
+                let c = if self.contains(Square::from_file_rank(file, rank)) { 'X' } else { '.' };
                 write!(f, " {c}")?;
             }
             writeln!(f)?;
         }
-        write!(f, "   a b c d e f g h")
+        f.write_str("   a b c d e f g h")
     }
 }
 
@@ -310,6 +331,14 @@ mod tests {
     }
 
     #[test]
+    fn collects_from_squares() {
+        let b: Bitboard = [Square::E4, Square::A1, Square::E4].into_iter().collect();
+        assert_eq!(b, bb(Square::A1) | bb(Square::E4));
+        assert_eq!(std::iter::empty().collect::<Bitboard>(), Bitboard::EMPTY);
+        assert_eq!(b.into_iter().collect::<Bitboard>(), b);
+    }
+
+    #[test]
     fn shifts_from_center() {
         let e4 = bb(Square::E4);
         assert_eq!(e4.north(), bb(Square::E5));
@@ -342,6 +371,9 @@ mod tests {
         assert_eq!((a | r).popcount(), 15);
         assert_eq!((a ^ r).popcount(), 14);
         assert_eq!(!Bitboard::EMPTY, Bitboard::FULL);
+        assert_eq!(a.union(r), a | r);
+        assert_eq!(a.intersection(r), a & r);
+        assert_eq!(a.difference(r), a & !r);
 
         let mut m = a;
         m &= r;

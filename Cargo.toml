@@ -7,6 +7,10 @@ description = "A UCI chess engine written in Rust."
 license = "MIT OR Apache-2.0"
 publish = false
 
+[features]
+# Use PEXT for slider lookups when the target has BMI2
+pext = []
+
 [dependencies]
 
 [dev-dependencies]

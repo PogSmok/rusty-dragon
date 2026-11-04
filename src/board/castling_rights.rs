@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self, Write};
 
 use super::Color;
 
@@ -77,7 +77,7 @@ impl fmt::Display for CastlingRights {
             (Self::BLACK_QUEENSIDE, 'q'),
         ] {
             if self.contains(right) {
-                write!(f, "{c}")?;
+                f.write_char(c)?;
             }
         }
         Ok(())
