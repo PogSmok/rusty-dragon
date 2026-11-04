@@ -111,6 +111,7 @@ jobs:
     timeout-minutes: 30
     env:
       RUSTFLAGS: "-D warnings ${{ matrix.target-flags }}"
+      RUSTDOCFLAGS: "${{ matrix.target-flags }}"
       RUSTY_DRAGON_EXPECTED_SLIDER_BACKEND: ${{ matrix.backend }}
     steps:
       - uses: actions/checkout@v4

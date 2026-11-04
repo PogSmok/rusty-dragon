@@ -1,5 +1,6 @@
 [build]
 rustflags = ["-C", "target-cpu=native"]
+rustdocflags = ["-C", "target-cpu=native"]
 
 [alias]
 lint = "clippy --all-targets --all-features -- -D warnings"
