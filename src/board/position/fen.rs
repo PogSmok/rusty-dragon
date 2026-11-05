@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use super::Position;
 use crate::board::{
-    Bitboard, CastlingRights, Color, File, ParseSquareError, Piece, PieceKind, Rank, Square,
+    Bitboard, Castle, CastlingRights, Color, File, ParseSquareError, Piece, PieceKind, Rank, Square,
 };
 
 /// Error returned when parsing a FEN string.
@@ -22,6 +22,9 @@ pub enum FenError {
     SideToMove(String),
     /// Castling field is not "-" or a combination of `KQkq` without repeats.
     Castling(String),
+    /// These castling rights lack their king or rook on the standard home square.
+    /// Chess960 is not supported.
+    IllegalCastling(CastlingRights),
     /// En passant field is not "-" or a square.
     EnPassant(ParseSquareError),
     /// En passant square doesn't follow a double pawn push by the side not to move.
@@ -46,6 +49,9 @@ impl fmt::Display for FenError {
             Self::SideToMove(s) => write!(f, "invalid side to move {s:?}, expected \"w\" or \"b\""),
             Self::Castling(s) => {
                 write!(f, "invalid castling rights {s:?}, expected \"-\" or subset of \"KQkq\"")
+            }
+            Self::IllegalCastling(rights) => {
+                write!(f, "castling rights {rights} need the king and rook on their home squares")
             }
             Self::EnPassant(_) => write!(f, "invalid en passant square"),
             Self::IllegalEnPassant(sq) => {
@@ -90,27 +96,29 @@ impl Position {
             _ => return Err(FenError::FieldCount(fields.len())),
         };
 
+        // Parse every field first, so a malformed field is reported before a problem with the
+        // position itself.
         let mut pos = Self::EMPTY;
         pos.parse_placement(placement)?;
-        pos.validate_pieces()?;
-
         pos.side_to_move = match side {
             "w" => Color::White,
             "b" => Color::Black,
             _ => return Err(FenError::SideToMove(side.to_string())),
         };
-        pos.castling_rights = parse_castling(castling)?;
-        pos.en_passant = match en_passant {
+        let castling_rights = parse_castling(castling)?;
+        let en_passant = match en_passant {
             "-" => None,
-            square => {
-                let square = square.parse().map_err(FenError::EnPassant)?;
-                Some(pos.validate_en_passant(square)?)
-            }
+            square => Some(square.parse().map_err(FenError::EnPassant)?),
         };
         pos.halfmove_clock = parse_clock(halfmove)?;
         pos.fullmove_number = parse_fullmove(fullmove)?;
 
-        // Last, so a malformed field is reported before a problem with the position itself.
+        pos.validate_pieces()?;
+        pos.castling_rights = pos.validate_castling(castling_rights)?;
+        pos.en_passant = match en_passant {
+            None => None,
+            Some(square) => pos.validate_en_passant(square)?,
+        };
         pos.validate_opponent_not_in_check()?;
         Ok(pos)
     }
@@ -186,7 +194,7 @@ impl Position {
             }
         }
         let back_ranks = Bitboard::RANK_1 | Bitboard::RANK_8;
-        if !(self.pieces_of_kind(PieceKind::Pawn) & back_ranks).is_empty() {
+        if self.pieces_of_kind(PieceKind::Pawn).intersects(back_ranks) {
             return Err(FenError::PawnRank);
         }
         Ok(())
@@ -196,29 +204,51 @@ impl Position {
     /// Needs `validate_pieces` first, so each side has exactly one king.
     fn validate_opponent_not_in_check(&self) -> Result<(), FenError> {
         let us = self.side_to_move;
-        let their_king = self.pieces(us.opposite(), PieceKind::King).lsb().expect("one king");
-        if self.is_attacked(their_king, us) { Err(FenError::OpponentInCheck) } else { Ok(()) }
+        if self.is_attacked(self.king_square(us.opposite()), us) {
+            Err(FenError::OpponentInCheck)
+        } else {
+            Ok(())
+        }
     }
 
-    /// Checks that `square` is where the side to move could capture en passant
-    fn validate_en_passant(&self, square: Square) -> Result<Square, FenError> {
-        let target = Bitboard::from_square(square);
-        let (rank, pushed_to, pushed_from) = match self.side_to_move {
-            Color::White => (Rank::R6, target.south(), target.north()),
-            Color::Black => (Rank::R3, target.north(), target.south()),
-        };
-        let opponent_pawns = self.pieces(self.side_to_move.opposite(), PieceKind::Pawn);
+    /// Checks that every right in `rights` has its king and rook on the standard home squares.
+    fn validate_castling(&self, rights: CastlingRights) -> Result<CastlingRights, FenError> {
+        let mut illegal = CastlingRights::NONE;
+        for castle in Castle::ALL {
+            if !rights.contains(castle.right) {
+                continue;
+            }
+            let color = castle.color;
+            let in_place = self.piece_at(castle.king_from)
+                == Some(Piece::new(color, PieceKind::King))
+                && self.piece_at(castle.rook_from) == Some(Piece::new(color, PieceKind::Rook));
+            if !in_place {
+                illegal = illegal.with(castle.right);
+            }
+        }
+        if illegal.is_empty() { Ok(rights) } else { Err(FenError::IllegalCastling(illegal)) }
+    }
 
-        let legal = square.rank() == rank
+    /// Checks that `square` is one the opponent's pawn just skipped with a double push. Returns
+    /// it only if the side to move has a legal en passant capture there, as `make_move` would
+    /// record it, so equal positions compare equal however they were set up.
+    /// Needs `validate_pieces` first, so each side has exactly one king.
+    fn validate_en_passant(&self, square: Square) -> Result<Option<Square>, FenError> {
+        let us = self.side_to_move;
+        let them = us.opposite();
+        let target = Bitboard::from_square(square);
+
+        let legal = them.en_passant_rank().contains(square)
             && !self.occupied().contains(square)
-            && !(opponent_pawns & pushed_to).is_empty()
-            && (self.occupied() & pushed_from).is_empty();
-        if legal { Ok(square) } else { Err(FenError::IllegalEnPassant(square)) }
+            && self.pieces(them, PieceKind::Pawn).intersects(target.forward(them))
+            && !self.occupied().intersects(target.forward(us));
+        if !legal {
+            return Err(FenError::IllegalEnPassant(square));
+        }
+        Ok(self.has_legal_en_passant(square).then_some(square))
     }
 }
 
-/// Parses the castling field. Rights are not checked against the king and rook
-/// placement, so Chess960 starting positions are not rejected.
 fn parse_castling(field: &str) -> Result<CastlingRights, FenError> {
     if field == "-" {
         return Ok(CastlingRights::NONE);
@@ -295,9 +325,26 @@ mod tests {
 
     #[test]
     fn round_trip() {
-        for fen in [Position::STARTPOS_FEN, KIWIPETE, EN_PASSANT, BLACK_EN_PASSANT, ENDGAME] {
+        for fen in [Position::STARTPOS_FEN, KIWIPETE, EN_PASSANT, ENDGAME] {
             assert_eq!(Position::from_fen(fen).map(|pos| pos.to_fen()), Ok(fen.to_string()));
         }
+    }
+
+    #[test]
+    fn en_passant_square_is_kept_only_if_the_capture_is_legal() {
+        // After 1.e4 no black pawn can capture on e3, so the square is dropped.
+        let pos: Position = BLACK_EN_PASSANT.parse().expect("valid FEN");
+        assert_eq!(pos.en_passant(), None);
+        assert_eq!(pos.to_fen(), BLACK_EN_PASSANT.replace(" e3 ", " - "));
+        // With a black pawn on d4 it's kept.
+        let fen = "rnbqkbnr/ppp1pppp/8/8/3pP3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 3";
+        assert_eq!(Position::from_fen(fen).map(|pos| pos.en_passant()), Ok(Some(Square::E3)));
+        // A pawn is next to it, but capturing would expose the king to the rook on h5.
+        let pos: Position = "8/8/8/K2pP2r/8/8/8/7k w - d6 0 1".parse().expect("valid FEN");
+        assert_eq!(pos.en_passant(), None);
+        // The pawn that double-pushed gives check and capturing it is legal.
+        let pos: Position = "8/8/8/3pP3/4K3/8/8/7k w - d6 0 1".parse().expect("valid FEN");
+        assert_eq!(pos.en_passant(), Some(Square::D6));
     }
 
     #[test]
@@ -350,10 +397,35 @@ mod tests {
     }
 
     #[test]
-    fn castling_rights_are_not_checked_against_placement() {
-        // Chess960-style: the king is not on e1 and there is no rook on h1.
-        let pos = Position::from_fen("4k3/8/8/8/8/8/8/1K6 w K - 0 1").expect("accepted");
-        assert_eq!(pos.castling_rights(), CastlingRights::WHITE_KINGSIDE);
+    fn castling_rights_need_king_and_rook_at_home() {
+        // The king is not on e1.
+        assert_eq!(
+            fen_error("4k3/8/8/8/8/8/8/1K5R w K - 0 1"),
+            FenError::IllegalCastling(CastlingRights::WHITE_KINGSIDE)
+        );
+        // No rook on h1.
+        assert_eq!(
+            fen_error("4k3/8/8/8/8/8/8/4K3 w K - 0 1"),
+            FenError::IllegalCastling(CastlingRights::WHITE_KINGSIDE)
+        );
+        // A black rook on a1 doesn't count for White.
+        assert_eq!(
+            fen_error("4k3/8/8/8/8/8/8/r3K3 w Q - 0 1"),
+            FenError::IllegalCastling(CastlingRights::WHITE_QUEENSIDE)
+        );
+        // Every missing right is reported, not just the first.
+        assert_eq!(
+            fen_error("r3k3/8/8/8/8/8/8/4K2R w KQkq - 0 1"),
+            FenError::IllegalCastling(
+                CastlingRights::WHITE_QUEENSIDE.with(CastlingRights::BLACK_KINGSIDE)
+            )
+        );
+        // Rights whose pieces are home are kept; others may be absent.
+        let pos = Position::from_fen("r3k3/8/8/8/8/8/8/4K2R w Kq - 0 1").expect("valid FEN");
+        assert_eq!(
+            pos.castling_rights(),
+            CastlingRights::WHITE_KINGSIDE.with(CastlingRights::BLACK_QUEENSIDE)
+        );
     }
 
     #[test]
@@ -420,5 +492,8 @@ mod tests {
             FenError::Castling("XYZ".into())
         );
         assert_eq!(fen_error("4k3/8/8/8/8/8/8/4R1K1 w - - 0 x"), FenError::Clock("x".into()));
+        assert_eq!(fen_error("4k3/8/8/8/8/8/8/4K3 w K - abc 1"), FenError::Clock("abc".into()));
+        assert_eq!(fen_error("4k3/8/8/8/8/8/8/4K3 w - e6 abc 1"), FenError::Clock("abc".into()));
+        assert_eq!(fen_error("8/8/8/8/8/8/8/8 x - - 0 1"), FenError::SideToMove("x".into()));
     }
 }

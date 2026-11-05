@@ -1,7 +1,7 @@
 //! Slider ray geometry.
 //!
-//! Only used at compile time to build the slider tables, and in tests as the reference to check
-//! them against.
+//! Only used at compile time to build the slider and square-pair tables, and in tests as the
+//! reference to check them against.
 
 use super::{Bitboard, Square};
 
@@ -53,6 +53,22 @@ impl Direction {
     #[must_use]
     const fn is_positive(self) -> bool {
         matches!(self, Self::North | Self::NorthEast | Self::East | Self::NorthWest)
+    }
+
+    /// The direction pointing the other way, e.g. `South` for `North`.
+    #[inline]
+    #[must_use]
+    const fn opposite(self) -> Self {
+        match self {
+            Self::North => Self::South,
+            Self::NorthEast => Self::SouthWest,
+            Self::East => Self::West,
+            Self::SouthEast => Self::NorthWest,
+            Self::South => Self::North,
+            Self::SouthWest => Self::NorthEast,
+            Self::West => Self::East,
+            Self::NorthWest => Self::SouthEast,
+        }
     }
 
     #[inline]
@@ -176,6 +192,57 @@ pub(super) const fn next_subset(subset: Bitboard, mask: Bitboard) -> Bitboard {
     Bitboard(subset.0.wrapping_sub(mask.0) & mask.0)
 }
 
+/// Pairwise square tables: `table[square_a_idx][square_b_idx]`
+/// Non-empty `Bitboard` for every pair of squares sharing a rank, file or diagonal
+/// Empty `Bitboard` for every other pair (including `square_a_idx == square_b_idx`).
+pub(super) type PairTable = [[Bitboard; 64]; 64];
+
+/// `table[square_a_idx][square_b_idx]`: squares strictly between `square_a_idx` and `square_b_idx`.
+/// Empty `Bitboard` if the squares don't share a rank, file or diagonal (or are adjacent).
+#[expect(clippy::large_stack_arrays, reason = "only evaluated at compile. time")]
+pub(super) const fn between_table() -> PairTable {
+    let mut table = [[Bitboard::EMPTY; 64]; 64];
+    let mut square_a_idx = 0;
+    while square_a_idx < 64 {
+        let mut direction_idx = 0;
+        while direction_idx < Direction::DIRECTION_COUNT {
+            let ray = RAYS[square_a_idx][direction_idx];
+            let mut rest = ray;
+            while let Some(square_b) = rest.pop_lsb() {
+                table[square_a_idx][square_b.index()] =
+                    ray.difference(RAYS[square_b.index()][direction_idx]).without_square(square_b);
+            }
+            direction_idx += 1;
+        }
+        square_a_idx += 1;
+    }
+    table
+}
+
+/// `table[square_a_idx][square_b_idx]`: entire rank, file or diagonal that contains both squares
+/// Empty `Bitboard` if the squares are not aligned
+#[expect(clippy::large_stack_arrays, reason = "only evaluated at compile time")]
+pub(super) const fn line_table() -> PairTable {
+    let mut table = [[Bitboard::EMPTY; 64]; 64];
+    let mut square_a_idx = 0;
+    while square_a_idx < 64 {
+        let mut direction_idx = 0;
+        while direction_idx < Direction::DIRECTION_COUNT {
+            let direction = Direction::ALL[direction_idx];
+            let ray = RAYS[square_a_idx][direction.index()];
+            let opposite = RAYS[square_a_idx][direction.opposite().index()];
+            let line = ray.union(opposite).with_square(Square::from_index(square_a_idx));
+            let mut rest = ray;
+            while let Some(square_b) = rest.pop_lsb() {
+                table[square_a_idx][square_b.index()] = line;
+            }
+            direction_idx += 1;
+        }
+        square_a_idx += 1;
+    }
+    table
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::xorshift::Xorshift64;
@@ -187,6 +254,15 @@ mod tests {
             let (file_step, rank_step) = direction.step();
             let offset = i32::from(rank_step) * 8 + i32::from(file_step);
             assert_eq!(direction.is_positive(), offset > 0, "{direction:?}");
+        }
+    }
+
+    #[test]
+    fn opposite_reverses_the_step() {
+        for direction in Direction::ALL {
+            let (file_step, rank_step) = direction.step();
+            assert_eq!(direction.opposite().step(), (-file_step, -rank_step), "{direction:?}");
+            assert_eq!(direction.opposite().opposite(), direction, "{direction:?}");
         }
     }
 

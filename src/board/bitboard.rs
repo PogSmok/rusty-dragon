@@ -5,7 +5,7 @@
 use std::fmt;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Not};
 
-use super::{File, Rank, Square};
+use super::{Color, File, Rank, Square};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[must_use]
@@ -85,6 +85,13 @@ impl Bitboard {
     #[must_use]
     pub const fn contains(self, square: Square) -> bool {
         (self.0 & Self::from_square(square).0) != 0
+    }
+
+    /// Whether `self` and `other` share at least one square.
+    #[inline]
+    #[must_use]
+    pub const fn intersects(self, other: Self) -> bool {
+        (self.0 & other.0) != 0
     }
 
     #[inline]
@@ -182,6 +189,15 @@ impl Bitboard {
     #[inline]
     pub const fn north_west(self) -> Self {
         Self((self.0 & !Self::FILE_A.0) << 7)
+    }
+
+    /// One square towards the opponent's side for `color`'s pawns.
+    #[inline]
+    pub const fn forward(self, color: Color) -> Self {
+        match color {
+            Color::White => self.north(),
+            Color::Black => self.south(),
+        }
     }
 }
 
@@ -307,6 +323,13 @@ mod tests {
     }
 
     #[test]
+    fn intersects() {
+        assert!(Bitboard::FILE_A.intersects(Bitboard::RANK_1));
+        assert!(!Bitboard::FILE_A.intersects(Bitboard::FILE_H));
+        assert!(!Bitboard::FULL.intersects(Bitboard::EMPTY));
+    }
+
+    #[test]
     fn lsb_and_pop_lsb() {
         let mut b = bb(Square::H8) | bb(Square::C3);
         assert_eq!(b.lsb(), Some(Square::C3));
@@ -349,6 +372,12 @@ mod tests {
         assert_eq!(e4.south_west(), bb(Square::D3));
         assert_eq!(e4.west(), bb(Square::D4));
         assert_eq!(e4.north_west(), bb(Square::D5));
+    }
+
+    #[test]
+    fn forward_follows_pawn_direction() {
+        assert_eq!(bb(Square::E4).forward(Color::White), bb(Square::E5));
+        assert_eq!(bb(Square::E4).forward(Color::Black), bb(Square::E3));
     }
 
     #[test]

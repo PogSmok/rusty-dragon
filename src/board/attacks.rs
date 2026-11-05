@@ -252,19 +252,44 @@ pub fn king_attacks(square: Square) -> Bitboard {
     KING_ATTACKS[square.index()]
 }
 
+/// Attacks of the slider `entry` describes, given the `occupied` squares.
+#[inline]
+fn slider_attacks(entry: &SliderEntry, occupied: Bitboard) -> Bitboard {
+    let index = slider_index(entry, occupied);
+    debug_assert!(index < SLIDER_TABLE_SIZE);
+    // SAFETY: It is guaranteed that `slider_index` returns a valid index into the `attacks` table
+    unsafe { *SLIDERS.attacks.get_unchecked(index) }
+}
+
 #[inline]
 pub fn bishop_attacks(square: Square, occupied: Bitboard) -> Bitboard {
-    SLIDERS.attacks[slider_index(&SLIDERS.bishop[square.index()], occupied)]
+    slider_attacks(&SLIDERS.bishop[square.index()], occupied)
 }
 
 #[inline]
 pub fn rook_attacks(square: Square, occupied: Bitboard) -> Bitboard {
-    SLIDERS.attacks[slider_index(&SLIDERS.rook[square.index()], occupied)]
+    slider_attacks(&SLIDERS.rook[square.index()], occupied)
 }
 
 #[inline]
 pub fn queen_attacks(square: Square, occupied: Bitboard) -> Bitboard {
     bishop_attacks(square, occupied) | rook_attacks(square, occupied)
+}
+
+static BETWEEN: rays::PairTable = rays::between_table();
+static LINE: rays::PairTable = rays::line_table();
+
+/// Squares strictly between `a` and `b` if they share a rank, file or diagonal, otherwise empty.
+#[inline]
+pub fn between(a: Square, b: Square) -> Bitboard {
+    BETWEEN[a.index()][b.index()]
+}
+
+/// The whole rank, file or diagonal through `a` and `b`, edge to edge, if they share one,
+/// otherwise empty. Also empty when `a == b`.
+#[inline]
+pub fn line(a: Square, b: Square) -> Bitboard {
+    LINE[a.index()][b.index()]
 }
 
 #[cfg(test)]
@@ -388,6 +413,47 @@ mod tests {
             for occupied in subsets(rays::relevant_mask(sq, BISHOP_DIRECTIONS)) {
                 let expected = rays::sliding_attacks(sq, occupied, BISHOP_DIRECTIONS);
                 assert_eq!(bishop_attacks(sq, occupied), expected, "bishop on {sq}");
+            }
+        }
+    }
+
+    #[test]
+    fn between_known_pairs() {
+        use Square::*;
+        assert_eq!(between(A1, H8), Bitboard::from_iter([B2, C3, D4, E5, F6, G7]));
+        assert_eq!(between(E1, H1), Bitboard::from_iter([F1, G1]));
+        assert_eq!(between(E4, E1), Bitboard::from_iter([E3, E2]));
+        assert_eq!(between(E4, E5), Bitboard::EMPTY);
+        assert_eq!(between(A1, B3), Bitboard::EMPTY, "not aligned");
+        assert_eq!(between(E4, E4), Bitboard::EMPTY);
+    }
+
+    #[test]
+    fn line_known_pairs() {
+        use Square::*;
+        assert_eq!(line(C3, E5), between(A1, H8) | Bitboard::from_iter([A1, H8]));
+        assert_eq!(line(E1, E4), Bitboard::FILE_E);
+        assert_eq!(line(H3, B3), Bitboard::RANK_3);
+        assert_eq!(line(A1, B3), Bitboard::EMPTY, "not aligned");
+        assert_eq!(line(E4, E4), Bitboard::EMPTY);
+    }
+
+    #[test]
+    fn pair_tables_are_symmetric_and_consistent() {
+        for a in Square::ALL {
+            for b in Square::ALL {
+                assert_eq!(between(a, b), between(b, a), "{a} {b}");
+                assert_eq!(line(a, b), line(b, a), "{a} {b}");
+                let aligned = !line(a, b).is_empty();
+                // Aligned squares are exactly those a queen on `a` sees on an empty board.
+                assert_eq!(aligned, queen_attacks(a, Bitboard::EMPTY).contains(b), "{a} {b}");
+                if aligned {
+                    let segment = between(a, b).with_square(a).with_square(b);
+                    assert_eq!(segment & line(a, b), segment, "{a} {b}");
+                    let blockers = Bitboard::from_square(a) | Bitboard::from_square(b);
+                    let seen = queen_attacks(a, blockers) & queen_attacks(b, blockers) & line(a, b);
+                    assert_eq!(seen, between(a, b), "{a} {b}");
+                }
             }
         }
     }

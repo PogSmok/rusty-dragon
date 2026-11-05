@@ -1,3 +1,5 @@
+use std::mem;
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(u8)]
 #[must_use]
@@ -12,13 +14,30 @@ pub enum Rank {
     R8,
 }
 
+// `from_index` transmutes any index below `ALL.len()`, so each must be a discriminant.
+const _: () = {
+    let mut rank_idx = 0;
+    while rank_idx < Rank::ALL.len() {
+        assert!(
+            Rank::ALL[rank_idx] as usize == rank_idx,
+            "discriminants must be consecutive, starting at 0"
+        );
+        rank_idx += 1;
+    }
+};
+
 impl Rank {
     pub const ALL: [Self; 8] =
         [Self::R1, Self::R2, Self::R3, Self::R4, Self::R5, Self::R6, Self::R7, Self::R8];
 
+    /// Panics if `i` is not below 8.
     #[inline]
     pub const fn from_index(i: usize) -> Self {
-        Self::ALL[i]
+        assert!(i < 8, "rank index out of range");
+        #[expect(clippy::cast_possible_truncation, reason = "i < 8")]
+        let discriminant = i as u8;
+        // SAFETY: `Rank` is `repr(u8)` with the discriminants 0..8, and `i < 8`.
+        unsafe { mem::transmute::<u8, Self>(discriminant) }
     }
 
     #[inline]
@@ -62,7 +81,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "index out of bounds")]
+    #[should_panic(expected = "rank index out of range")]
     fn from_index_out_of_range_panics() {
         let _ = Rank::from_index(8);
     }

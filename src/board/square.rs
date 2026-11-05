@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::fmt;
+use std::mem;
 use std::str::FromStr;
 
 use super::{File, Rank};
@@ -19,6 +20,18 @@ pub enum Square {
     A8, B8, C8, D8, E8, F8, G8, H8,
 }
 
+// `from_index` transmutes any index below `ALL.len()`, so each must be a discriminant.
+const _: () = {
+    let mut square_idx = 0;
+    while square_idx < Square::ALL.len() {
+        assert!(
+            Square::ALL[square_idx] as usize == square_idx,
+            "discriminants must be consecutive, starting at 0"
+        );
+        square_idx += 1;
+    }
+};
+
 impl Square {
     #[rustfmt::skip]
     pub const ALL: [Self; 64] = [
@@ -32,9 +45,20 @@ impl Square {
         Self::A8, Self::B8, Self::C8, Self::D8, Self::E8, Self::F8, Self::G8, Self::H8,
     ];
 
+    /// Panics if `i` is not below 64.
     #[inline]
     pub const fn from_index(i: usize) -> Self {
-        Self::ALL[i]
+        assert!(i < 64, "square index out of range");
+        #[expect(clippy::cast_possible_truncation, reason = "i < 64")]
+        let discriminant = i as u8;
+        // SAFETY: `Square` is `repr(u8)` with the discriminants 0..64, and `i < 64`.
+        unsafe { mem::transmute::<u8, Self>(discriminant) }
+    }
+
+    /// The square `delta` indices away, e.g. `8` for one rank up. Indices wrap modulo 64.
+    #[inline]
+    pub fn wrapping_offset(self, delta: i8) -> Self {
+        Self::from_index(self.index().wrapping_add_signed(isize::from(delta)) % 64)
     }
 
     #[inline]
@@ -110,9 +134,28 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "index out of bounds")]
+    fn from_index_matches_all() {
+        for (i, &square) in Square::ALL.iter().enumerate() {
+            assert_eq!(Square::from_index(i), square);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "square index out of range")]
     fn from_index_out_of_range_panics() {
         let _ = Square::from_index(64);
+    }
+
+    #[test]
+    fn wrapping_offset_moves_by_index() {
+        assert_eq!(Square::E2.wrapping_offset(8), Square::E3);
+        assert_eq!(Square::E2.wrapping_offset(16), Square::E4);
+        assert_eq!(Square::E7.wrapping_offset(-9), Square::D6);
+        assert_eq!(Square::H1.wrapping_offset(1), Square::A2);
+
+        // Modulo 64 wrapping
+        assert_eq!(Square::A1.wrapping_offset(-1), Square::H8);
+        assert_eq!(Square::H8.wrapping_offset(1), Square::A1);
     }
 
     #[test]

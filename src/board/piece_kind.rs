@@ -1,3 +1,5 @@
+use std::mem;
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(u8)]
 #[must_use]
@@ -10,13 +12,30 @@ pub enum PieceKind {
     King,
 }
 
+// `from_index` transmutes any index below `ALL.len()`, so each must be a discriminant.
+const _: () = {
+    let mut piece_kind_idx = 0;
+    while piece_kind_idx < PieceKind::ALL.len() {
+        assert!(
+            PieceKind::ALL[piece_kind_idx] as usize == piece_kind_idx,
+            "discriminants must be consecutive, starting at 0"
+        );
+        piece_kind_idx += 1;
+    }
+};
+
 impl PieceKind {
     pub const ALL: [Self; 6] =
         [Self::Pawn, Self::Knight, Self::Bishop, Self::Rook, Self::Queen, Self::King];
 
+    /// Panics if `i` is not below 6.
     #[inline]
     pub const fn from_index(i: usize) -> Self {
-        Self::ALL[i]
+        assert!(i < 6, "piece kind index out of range");
+        #[expect(clippy::cast_possible_truncation, reason = "i < 6")]
+        let discriminant = i as u8;
+        // SAFETY: `PieceKind` is `repr(u8)` with the discriminants 0..6, and `i < 6`.
+        unsafe { mem::transmute::<u8, Self>(discriminant) }
     }
 
     #[inline]
@@ -60,7 +79,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "index out of bounds")]
+    #[should_panic(expected = "piece kind index out of range")]
     fn from_index_out_of_range_panics() {
         let _ = PieceKind::from_index(6);
     }
