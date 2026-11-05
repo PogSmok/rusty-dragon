@@ -1,3 +1,5 @@
+use std::mem;
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(u8)]
 #[must_use]
@@ -6,15 +8,32 @@ pub enum File {
     A, B, C, D, E, F, G, H
 }
 
+// `from_index` transmutes any index below `ALL.len()`, so each must be a discriminant.
+const _: () = {
+    let mut file_idx = 0;
+    while file_idx < File::ALL.len() {
+        assert!(
+            File::ALL[file_idx] as usize == file_idx,
+            "discriminants must be consecutive, starting at 0"
+        );
+        file_idx += 1;
+    }
+};
+
 impl File {
     #[rustfmt::skip]
     pub const ALL: [Self; 8] = [
         Self::A, Self::B, Self::C, Self::D, Self::E, Self::F, Self::G, Self::H
     ];
 
+    /// Panics if `i` is not below 8.
     #[inline]
     pub const fn from_index(i: usize) -> Self {
-        Self::ALL[i]
+        assert!(i < 8, "file index out of range");
+        #[expect(clippy::cast_possible_truncation, reason = "i < 8")]
+        let discriminant = i as u8;
+        // SAFETY: `File` is `repr(u8)` with the discriminants 0..8, and `i < 8`.
+        unsafe { mem::transmute::<u8, Self>(discriminant) }
     }
 
     #[inline]
@@ -58,7 +77,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "index out of bounds")]
+    #[should_panic(expected = "file index out of range")]
     fn from_index_out_of_range_panics() {
         let _ = File::from_index(8);
     }

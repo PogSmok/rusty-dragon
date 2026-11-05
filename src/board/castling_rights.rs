@@ -1,6 +1,67 @@
 use std::fmt::{self, Write};
 
-use super::Color;
+use super::{Color, File, MoveKind, Rank, Square};
+
+/// One of the four castling moves in standard chess
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Castle {
+    pub right: CastlingRights,
+    pub color: Color,
+    pub kind: MoveKind,
+    pub king_from: Square,
+    pub king_to: Square,
+    pub rook_from: Square,
+    pub rook_to: Square,
+}
+
+impl Castle {
+    pub const WHITE_KINGSIDE: Self = Self::new(Color::White, true);
+    pub const WHITE_QUEENSIDE: Self = Self::new(Color::White, false);
+    pub const BLACK_KINGSIDE: Self = Self::new(Color::Black, true);
+    pub const BLACK_QUEENSIDE: Self = Self::new(Color::Black, false);
+
+    const fn new(color: Color, kingside: bool) -> Self {
+        let rank = match color {
+            Color::White => Rank::R1,
+            Color::Black => Rank::R8,
+        };
+        let king_from = Square::from_file_rank(File::E, rank);
+        if kingside {
+            Self {
+                right: CastlingRights::kingside(color),
+                color,
+                kind: MoveKind::KingsideCastle,
+                king_from,
+                king_to: Square::from_file_rank(File::G, rank),
+                rook_from: Square::from_file_rank(File::H, rank),
+                rook_to: Square::from_file_rank(File::F, rank),
+            }
+        } else {
+            Self {
+                right: CastlingRights::queenside(color),
+                color,
+                kind: MoveKind::QueensideCastle,
+                king_from,
+                king_to: Square::from_file_rank(File::C, rank),
+                rook_from: Square::from_file_rank(File::A, rank),
+                rook_to: Square::from_file_rank(File::D, rank),
+            }
+        }
+    }
+
+    pub const ALL: [Self; 4] =
+        [Self::WHITE_KINGSIDE, Self::WHITE_QUEENSIDE, Self::BLACK_KINGSIDE, Self::BLACK_QUEENSIDE];
+
+    /// `color`'s kingside and queenside castles.
+    #[inline]
+    #[must_use]
+    pub const fn of(color: Color) -> [Self; 2] {
+        match color {
+            Color::White => [Self::WHITE_KINGSIDE, Self::WHITE_QUEENSIDE],
+            Color::Black => [Self::BLACK_KINGSIDE, Self::BLACK_QUEENSIDE],
+        }
+    }
+}
 
 /// Set of the four castling rights, one bit each.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug)]
@@ -32,12 +93,6 @@ impl CastlingRights {
             Color::White => Self::WHITE_QUEENSIDE,
             Color::Black => Self::BLACK_QUEENSIDE,
         }
-    }
-
-    /// Both rights for `color`.
-    #[inline]
-    pub const fn both(color: Color) -> Self {
-        Self(Self::kingside(color).0 | Self::queenside(color).0)
     }
 
     #[inline]
@@ -90,14 +145,11 @@ mod tests {
 
     #[test]
     fn all_contains_every_right() {
+        let mut all = CastlingRights::NONE;
         for color in Color::ALL {
-            assert!(CastlingRights::ALL.contains(CastlingRights::kingside(color)));
-            assert!(CastlingRights::ALL.contains(CastlingRights::queenside(color)));
+            all = all.with(CastlingRights::kingside(color)).with(CastlingRights::queenside(color));
         }
-        assert_eq!(
-            CastlingRights::both(Color::White).with(CastlingRights::both(Color::Black)),
-            CastlingRights::ALL
-        );
+        assert_eq!(all, CastlingRights::ALL);
     }
 
     #[test]
@@ -109,9 +161,23 @@ mod tests {
     }
 
     #[test]
-    fn king_move_removes_both_rights() {
-        let rights = CastlingRights::ALL.without(CastlingRights::both(Color::White));
-        assert_eq!(rights, CastlingRights::both(Color::Black));
+    fn castles_use_the_standard_squares() {
+        let white_kingside = Castle::WHITE_KINGSIDE;
+        assert_eq!(white_kingside.right, CastlingRights::WHITE_KINGSIDE);
+        assert_eq!(white_kingside.kind, MoveKind::KingsideCastle);
+        assert_eq!([white_kingside.king_from, white_kingside.king_to], [Square::E1, Square::G1]);
+        assert_eq!([white_kingside.rook_from, white_kingside.rook_to], [Square::H1, Square::F1]);
+        let black_queenside = Castle::BLACK_QUEENSIDE;
+        assert_eq!(black_queenside.right, CastlingRights::BLACK_QUEENSIDE);
+        assert_eq!(black_queenside.kind, MoveKind::QueensideCastle);
+        assert_eq!([black_queenside.king_from, black_queenside.king_to], [Square::E8, Square::C8]);
+        assert_eq!([black_queenside.rook_from, black_queenside.rook_to], [Square::A8, Square::D8]);
+
+        for castle in Castle::ALL {
+            assert!(Castle::of(castle.color).contains(&castle), "{castle:?}");
+        }
+        let rights = Castle::ALL.iter().fold(CastlingRights::NONE, |all, c| all.with(c.right));
+        assert_eq!(rights, CastlingRights::ALL);
     }
 
     #[test]

@@ -6,6 +6,8 @@ use super::{
 };
 
 mod fen;
+mod make_move;
+mod movegen;
 
 pub use fen::FenError;
 
@@ -61,7 +63,6 @@ impl Position {
 
     /// Removes and returns the piece on `square`, or `None` if it is empty.
     #[inline]
-    #[cfg_attr(not(test), expect(dead_code, reason = "used by make_move, not written yet"))]
     fn remove_piece(&mut self, square: Square) -> Option<Piece> {
         let piece = self.board_mailbox[square.index()].take()?;
 
@@ -75,7 +76,6 @@ impl Position {
 
     /// Moves the piece on `from` to the empty square `to`.
     #[inline]
-    #[cfg_attr(not(test), expect(dead_code, reason = "used by make_move, not written yet"))]
     fn move_piece(&mut self, from: Square, to: Square) {
         debug_assert!(self.board_mailbox[to.index()].is_none(), "destination already occupied");
 
@@ -119,20 +119,39 @@ impl Position {
         }
     }
 
-    /// Whether any piece of color `by` attacks `square`.
-    #[must_use]
-    pub fn is_attacked(&self, square: Square, by: Color) -> bool {
-        let occupied = self.occupied();
-        let queens = self.pieces(by, PieceKind::Queen);
-        let diagonal = self.pieces(by, PieceKind::Bishop) | queens;
-        let straight = self.pieces(by, PieceKind::Rook) | queens;
-        // A pawn `by` attacks `square` iff pawn of opposite color on `square` attacks it back
-        let attackers = (pawn_attacks(by.opposite(), square) & self.pieces(by, PieceKind::Pawn))
-            | (knight_attacks(square) & self.pieces(by, PieceKind::Knight))
-            | (king_attacks(square) & self.pieces(by, PieceKind::King))
+    #[inline]
+    pub fn attackers(&self, square: Square, by: Color, occupied: Bitboard) -> Bitboard {
+        let queens = self.pieces_of_kind(PieceKind::Queen);
+        let diagonal = self.pieces_of_kind(PieceKind::Bishop) | queens;
+        let straight = self.pieces_of_kind(PieceKind::Rook) | queens;
+        // A pawn `by` attacks `square` iff a pawn of the other color on `square` attacks it back.
+        let attackers = (pawn_attacks(by.opposite(), square)
+            & self.pieces_of_kind(PieceKind::Pawn))
+            | (knight_attacks(square) & self.pieces_of_kind(PieceKind::Knight))
+            | (king_attacks(square) & self.pieces_of_kind(PieceKind::King))
             | (bishop_attacks(square, occupied) & diagonal)
             | (rook_attacks(square, occupied) & straight);
-        !attackers.is_empty()
+        attackers & self.pieces_of_color(by)
+    }
+
+    /// Whether any piece of color `by` attacks `square`.
+    #[inline]
+    #[must_use]
+    pub fn is_attacked(&self, square: Square, by: Color) -> bool {
+        !self.attackers(square, by, self.occupied()).is_empty()
+    }
+
+    /// Square of `color`'s king. Every position has exactly one king per side.
+    #[inline]
+    pub fn king_square(&self, color: Color) -> Square {
+        self.pieces(color, PieceKind::King).lsb().expect("each side has a king")
+    }
+
+    /// Whether the side to move is in check.
+    #[must_use]
+    pub fn in_check(&self) -> bool {
+        let us = self.side_to_move;
+        self.is_attacked(self.king_square(us), us.opposite())
     }
 
     #[inline]
