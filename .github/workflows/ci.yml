@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with: { components: rustfmt }
       - run: cargo fmt --all -- --check
@@ -44,7 +44,7 @@ jobs:
     env:
       RUSTFLAGS: "-D warnings ${{ matrix.target-flags }}"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with: { components: clippy }
       - uses: Swatinem/rust-cache@v2
@@ -55,7 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Read the MSRV from `rust-version` in Cargo.toml, so it's never out of sync.
       - name: Read MSRV
         id: msrv
@@ -85,7 +85,7 @@ jobs:
       RUSTFLAGS: "-D warnings ${{ matrix.target-flags }}"
       RUSTDOCFLAGS: "-D warnings ${{ matrix.target-flags }}"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with: { save-if: "${{ github.ref == 'refs/heads/main' }}" }
@@ -114,7 +114,7 @@ jobs:
       RUSTDOCFLAGS: "${{ matrix.target-flags }}"
       RUSTY_DRAGON_EXPECTED_SLIDER_BACKEND: ${{ matrix.backend }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with: { save-if: "${{ github.ref == 'refs/heads/main' }}" }
