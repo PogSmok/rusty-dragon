@@ -12,6 +12,7 @@ mod piece_kind;
 mod position;
 mod rank;
 mod square;
+mod zobrist;
 
 pub use attacks::{
     between, bishop_attacks, king_attacks, knight_attacks, line, pawn_attacks, queen_attacks,

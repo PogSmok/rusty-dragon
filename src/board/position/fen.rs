@@ -100,11 +100,12 @@ impl Position {
         // position itself.
         let mut pos = Self::EMPTY;
         pos.parse_placement(placement)?;
-        pos.side_to_move = match side {
+        let side = match side {
             "w" => Color::White,
             "b" => Color::Black,
             _ => return Err(FenError::SideToMove(side.to_string())),
         };
+        pos.set_side_to_move(side);
         let castling_rights = parse_castling(castling)?;
         let en_passant = match en_passant {
             "-" => None,
@@ -114,12 +115,15 @@ impl Position {
         pos.fullmove_number = parse_fullmove(fullmove)?;
 
         pos.validate_pieces()?;
-        pos.castling_rights = pos.validate_castling(castling_rights)?;
-        pos.en_passant = match en_passant {
+        let castling_rights = pos.validate_castling(castling_rights)?;
+        pos.set_castling_rights(castling_rights);
+        let en_passant = match en_passant {
             None => None,
             Some(square) => pos.validate_en_passant(square)?,
         };
+        pos.set_en_passant(en_passant);
         pos.validate_opponent_not_in_check()?;
+        pos.debug_check_zobrist_key();
         Ok(pos)
     }
 
