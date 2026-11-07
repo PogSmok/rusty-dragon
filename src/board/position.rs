@@ -2,7 +2,7 @@ use std::fmt;
 
 use super::{
     Bitboard, CastlingRights, Color, File, Piece, PieceKind, Rank, Square, bishop_attacks,
-    king_attacks, knight_attacks, pawn_attacks, rook_attacks,
+    king_attacks, knight_attacks, pawn_attacks, rook_attacks, zobrist,
 };
 
 mod fen;
@@ -15,6 +15,11 @@ pub use fen::FenError;
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[must_use]
 pub struct Position {
+    /// Zobrist key of everything below but the move counters.
+    /// Kept in sync by the board and state writes, the only code that changes what it covers.
+    /// First, so the derived `PartialEq` rejects unequal positions on one comparison.
+    zobrist_key: u64,
+
     /// Squares occupied by each piece kind (both colors), indexed by `PieceKind`.
     by_kind: [Bitboard; 6],
     /// Squares occupied by each color, indexed by `Color`.
@@ -33,8 +38,9 @@ pub struct Position {
 }
 
 impl Position {
-    /// No pieces, White to move, no castling rights, move 1.
+    /// No pieces, White to move, no castling rights, move 1. Its Zobrist key is 0.
     const EMPTY: Self = Self {
+        zobrist_key: 0,
         by_kind: [Bitboard::EMPTY; 6],
         by_color: [Bitboard::EMPTY; 2],
         board_mailbox: [None; 64],
@@ -46,7 +52,8 @@ impl Position {
     };
 
     // Board writes. These three are the only code that modifies `by_kind`, `by_color`
-    // and `board_mailbox`, so the representations can never drift apart.
+    // and `board_mailbox`, so the representations and the pieces' part of the Zobrist key can
+    // never drift apart.
 
     /// Puts `piece` on the empty square `square`.
     #[inline]
@@ -57,6 +64,7 @@ impl Position {
         self.by_color[piece.color().index()] |= bb;
         self.by_kind[piece.kind().index()] |= bb;
         self.board_mailbox[square.index()] = Some(piece);
+        self.zobrist_key ^= zobrist::piece(piece, square);
 
         self.debug_check_square(square);
     }
@@ -69,6 +77,7 @@ impl Position {
         let bb = !Bitboard::from_square(square);
         self.by_color[piece.color().index()] &= bb;
         self.by_kind[piece.kind().index()] &= bb;
+        self.zobrist_key ^= zobrist::piece(piece, square);
 
         self.debug_check_square(square);
         Some(piece)
@@ -84,9 +93,52 @@ impl Position {
         self.by_color[piece.color().index()] ^= mask;
         self.by_kind[piece.kind().index()] ^= mask;
         self.board_mailbox[to.index()] = Some(piece);
+        self.zobrist_key ^= zobrist::piece(piece, from) ^ zobrist::piece(piece, to);
 
         self.debug_check_square(from);
         self.debug_check_square(to);
+    }
+
+    /// Hands the move to the other side.
+    #[inline]
+    fn flip_side_to_move(&mut self) {
+        self.side_to_move = self.side_to_move.opposite();
+        self.zobrist_key ^= zobrist::black_to_move();
+    }
+
+    #[inline]
+    fn set_side_to_move(&mut self, side: Color) {
+        if side != self.side_to_move {
+            self.flip_side_to_move();
+        }
+    }
+
+    #[inline]
+    fn set_castling_rights(&mut self, rights: CastlingRights) {
+        self.zobrist_key ^= zobrist::castling(self.castling_rights) ^ zobrist::castling(rights);
+        self.castling_rights = rights;
+    }
+
+    #[inline]
+    fn set_en_passant(&mut self, square: Option<Square>) {
+        self.zobrist_key ^= zobrist::en_passant(self.en_passant) ^ zobrist::en_passant(square);
+        self.en_passant = square;
+    }
+
+    /// The Zobrist key computed from scratch, which the kept one must always equal.
+    /// Read from the bitboards, while the board writes hash what they put in the mailbox,
+    /// so a check against it also compares the two.
+    fn compute_zobrist_key(&self) -> u64 {
+        let mut zobrist_key = zobrist::castling(self.castling_rights);
+        for piece in Piece::ALL {
+            for square in self.pieces(piece.color(), piece.kind()) {
+                zobrist_key ^= zobrist::piece(piece, square);
+            }
+        }
+        if self.side_to_move == Color::Black {
+            zobrist_key ^= zobrist::black_to_move();
+        }
+        zobrist_key ^ zobrist::en_passant(self.en_passant)
     }
 
     #[inline]
@@ -94,6 +146,18 @@ impl Position {
         if cfg!(debug_assertions) {
             self.assert_square_consistent(square);
         }
+    }
+
+    #[inline]
+    fn debug_check_zobrist_key(&self) {
+        if cfg!(debug_assertions) {
+            self.assert_zobrist_key_current();
+        }
+    }
+
+    /// Panics if the kept Zobrist key differs from the one computed from scratch.
+    fn assert_zobrist_key_current(&self) {
+        assert_eq!(self.zobrist_key, self.compute_zobrist_key(), "Zobrist key is out of date");
     }
 
     /// Panics if the bitboards and the mailbox disagree about `square`.
@@ -111,12 +175,14 @@ impl Position {
         }
     }
 
-    /// Panics if the bitboards and the mailbox disagree anywhere on the board.
+    /// Panics if the bitboards and the mailbox disagree anywhere on the board, or the Zobrist
+    /// key is out of date.
     #[cfg_attr(not(test), expect(dead_code, reason = "only used by tests"))]
     fn assert_consistent(&self) {
         for square in Square::ALL {
             self.assert_square_consistent(square);
         }
+        self.assert_zobrist_key_current();
     }
 
     #[inline]
@@ -208,6 +274,20 @@ impl Position {
     pub const fn fullmove_number(&self) -> u16 {
         self.fullmove_number
     }
+
+    /// Equal for positions with the same pieces, side to move, castling rights and
+    /// en passant square, whatever the move counters.
+    /// Distinct positions almost always get distinct Zobrist keys, but a collision is possible.
+    ///
+    /// Due to collissions a move found by Zobrist key, such as a transposition table's best move,
+    /// has to be checked for legality before it's played.
+    /// Engines tested with far more frequent collisions than 64-bit keys give showed no
+    /// measurable loss of strength (Hyatt and Cozzie, 2005).
+    #[inline]
+    #[must_use]
+    pub const fn zobrist_key(&self) -> u64 {
+        self.zobrist_key
+    }
 }
 
 /// Prints the board with rank 8 at the top, FEN letters for pieces and `.` for empty squares.
@@ -235,7 +315,7 @@ mod tests {
 
     #[test]
     fn size_is_compact() {
-        assert_eq!(size_of::<Position>(), 136);
+        assert_eq!(size_of::<Position>(), 144);
     }
 
     #[test]

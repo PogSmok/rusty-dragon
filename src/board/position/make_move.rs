@@ -25,7 +25,7 @@ impl Position {
         let piece = self.piece_at(from).expect("no piece on source square");
         debug_assert_eq!(piece.color(), us, "{mv} moves the opponent's piece");
 
-        self.en_passant = None;
+        self.set_en_passant(None);
         self.halfmove_clock = if piece.kind() == PieceKind::Pawn || mv.is_capture() {
             0
         } else {
@@ -54,19 +54,19 @@ impl Position {
         }
 
         let lost = RIGHTS_LOST[from.index()].with(RIGHTS_LOST[to.index()]);
-        self.castling_rights = self.castling_rights.without(lost);
+        self.set_castling_rights(self.castling_rights.without(lost));
 
         if us == Color::Black {
             self.fullmove_number = self.fullmove_number.saturating_add(1);
         }
-        self.side_to_move = us.opposite();
+        self.flip_side_to_move();
 
         // After switching sides, since the opponent is the one who would capture.
         if mv.is_double_push() {
             // The square the pawn skipped, one push from where it started.
             let skipped = from.wrapping_offset(us.pawn_push());
             if self.has_legal_en_passant(skipped) {
-                self.en_passant = Some(skipped);
+                self.set_en_passant(Some(skipped));
             }
         }
 
@@ -74,6 +74,7 @@ impl Position {
             !self.is_attacked(self.king_square(us), self.side_to_move),
             "{mv} left the king in check"
         );
+        self.debug_check_zobrist_key();
     }
 }
 
@@ -154,6 +155,73 @@ mod tests {
         let fen = "1n2k3/P7/8/8/8/8/8/4K3 w - - 5 40";
         assert_eq!(play(fen, &["a7a8q"]), "Qn2k3/8/8/8/8/8/8/4K3 b - - 0 40");
         assert_eq!(play(fen, &["a7b8n"]), "1N2k3/8/8/8/8/8/8/4K3 b - - 0 40");
+    }
+
+    /// Checks the kept Zobrist key at every node `depth` plies below `pos`, against the one
+    /// computed from scratch and the one of the same position read back from its FEN.
+    fn check_zobrist_keys(pos: &Position, depth: u32) {
+        pos.assert_consistent();
+        let from_fen = Position::from_fen(&pos.to_fen()).expect("valid FEN");
+        assert_eq!(pos.zobrist_key(), from_fen.zobrist_key(), "{}", pos.to_fen());
+        if depth > 0 {
+            for &mv in &pos.legal_moves() {
+                let mut child = pos.clone();
+                child.make_move(mv);
+                check_zobrist_keys(&child, depth - 1);
+            }
+        }
+    }
+
+    #[test]
+    fn zobrist_key_stays_in_sync_through_every_kind_of_move() {
+        for fen in [
+            Position::STARTPOS_FEN,
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+            "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
+            "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
+        ] {
+            check_zobrist_keys(&Position::from_fen(fen).expect("valid FEN"), 3);
+        }
+    }
+
+    #[test]
+    fn transpositions_share_a_zobrist_key_whatever_the_move_counters() {
+        // The Zobrist key `make_move` keeps, not one computed from scratch.
+        let zobrist_key = |moves: &[&str]| {
+            let mut pos = Position::startpos();
+            for uci in moves {
+                pos.make_move(pos.parse_uci_move(uci).expect("legal"));
+            }
+            pos.zobrist_key()
+        };
+        assert_eq!(
+            zobrist_key(&["e2e4", "e7e5", "g1f3", "b8c6"]),
+            zobrist_key(&["g1f3", "b8c6", "e2e4", "e7e5"])
+        );
+        // Knights out and back: the start position again, with different counters.
+        assert_eq!(
+            zobrist_key(&["g1f3", "g8f6", "f3g1", "f6g8"]),
+            Position::startpos().zobrist_key()
+        );
+    }
+
+    #[test]
+    fn zobrist_key_tells_apart_side_castling_and_en_passant() {
+        let zobrist_key = |fen| Position::from_fen(fen).expect("valid FEN").zobrist_key();
+        // The pawn on e5 can take en passant on either d6 or f6.
+        let board = "r3k2r/8/8/3pPp2/8/8/8/R3K2R";
+        let zobrist_keys = [
+            zobrist_key(&format!("{board} w KQkq d6 0 1")),
+            zobrist_key(&format!("{board} w KQkq f6 0 1")),
+            zobrist_key(&format!("{board} w KQkq - 0 1")),
+            zobrist_key(&format!("{board} w Kkq d6 0 1")),
+            zobrist_key(&format!("{board} b KQkq - 0 1")),
+        ];
+        for (i, a) in zobrist_keys.iter().enumerate() {
+            for b in &zobrist_keys[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
     }
 
     #[test]

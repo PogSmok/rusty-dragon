@@ -97,6 +97,12 @@ impl CastlingRights {
 
     #[inline]
     #[must_use]
+    pub(crate) const fn index(self) -> usize {
+        self.0 as usize
+    }
+
+    #[inline]
+    #[must_use]
     pub const fn is_empty(self) -> bool {
         self.0 == Self::NONE.0
     }
