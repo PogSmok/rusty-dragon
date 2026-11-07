@@ -330,6 +330,7 @@ impl<'a> MoveGen<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::positions::{FOOLS_MATE, KIWIPETE, MOST_LEGAL_MOVES};
 
     fn moves(fen: &str) -> Vec<String> {
         let pos = Position::from_fen(fen).expect("valid FEN");
@@ -349,17 +350,15 @@ mod tests {
 
     #[test]
     fn most_moves_known_fit_in_the_list() {
-        // The position with the most legal moves known, 218.
-        let pos = Position::from_fen("R6R/3Q4/1Q4Q1/4Q3/2Q4Q/Q4Q2/pp1Q4/kBNN1KB1 w - - 0 1")
-            .expect("valid FEN");
+        let pos = Position::from_fen(MOST_LEGAL_MOVES).expect("valid FEN");
         assert_eq!(pos.legal_moves().len(), 218);
     }
 
     #[test]
     fn captures_and_promotions_come_before_quiet_moves() {
         let fens = [
-            // Kiwipete: captures by every piece kind, castling both sides.
-            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+            // Captures by every piece kind, castling both sides.
+            KIWIPETE,
             // En passant next to quiet pawn pushes.
             "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3",
             // Promotions, both by push and by capture.
@@ -489,9 +488,7 @@ mod tests {
 
     #[test]
     fn checkmate_and_stalemate_have_no_moves() {
-        // Fool's mate.
-        let mate = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3";
-        assert_eq!(moves(mate), Vec::<String>::new());
+        assert_eq!(moves(FOOLS_MATE), Vec::<String>::new());
         let stalemate = "7k/5Q2/6K1/8/8/8/8/8 b - - 0 1";
         assert_eq!(moves(stalemate), Vec::<String>::new());
     }

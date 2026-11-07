@@ -398,6 +398,7 @@ impl<W: Write> Session<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::positions::{FOOLS_MATE, STARTPOS};
 
     /// Runs a session on `input` and returns its output, without the greeting line.
     fn session(input: &str) -> String {
@@ -480,7 +481,7 @@ mod tests {
     #[test]
     fn ucinewgame_resets_the_position() {
         let out = session("position startpos moves e2e4\nucinewgame\nd\n");
-        assert!(out.ends_with(&format!("Fen: {}\n", Position::STARTPOS_FEN)));
+        assert!(out.ends_with(&format!("Fen: {STARTPOS}\n")));
     }
 
     #[test]
@@ -500,8 +501,7 @@ mod tests {
 
     #[test]
     fn go_without_legal_moves_plays_the_null_move() {
-        let mate = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3";
-        assert_eq!(session(&format!("position fen {mate}\ngo depth 1\n")), "bestmove 0000\n");
+        assert_eq!(session(&format!("position fen {FOOLS_MATE}\ngo depth 1\n")), "bestmove 0000\n");
     }
 
     #[test]

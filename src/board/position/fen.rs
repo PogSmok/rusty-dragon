@@ -6,6 +6,7 @@ use super::Position;
 use crate::board::{
     Bitboard, Castle, CastlingRights, Color, File, ParseSquareError, Piece, PieceKind, Rank, Square,
 };
+use crate::positions;
 
 /// Error returned when parsing a FEN string.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -75,10 +76,9 @@ impl Error for FenError {
 }
 
 impl Position {
-    pub const STARTPOS_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-
+    /// The standard starting position, [`positions::STARTPOS`].
     pub fn startpos() -> Self {
-        Self::from_fen(Self::STARTPOS_FEN).expect("STARTPOS_FEN is valid")
+        Self::from_fen(positions::STARTPOS).expect("STARTPOS is valid")
     }
 
     /// Parses a FEN string. The halfmove clock and fullmove number may be left out, in which
@@ -303,8 +303,8 @@ impl FromStr for Position {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::positions::{KIWIPETE, STARTPOS};
 
-    const KIWIPETE: &str = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
     const EN_PASSANT: &str = "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3";
     const BLACK_EN_PASSANT: &str = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
     const ENDGAME: &str = "8/8/8/8/8/8/8/K6k b - - 12 60";
@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn round_trip() {
-        for fen in [Position::STARTPOS_FEN, KIWIPETE, EN_PASSANT, ENDGAME] {
+        for fen in [STARTPOS, KIWIPETE, EN_PASSANT, ENDGAME] {
             assert_eq!(Position::from_fen(fen).map(|pos| pos.to_fen()), Ok(fen.to_string()));
         }
     }
