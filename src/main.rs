@@ -1,22 +1,28 @@
 use std::env;
+use std::io;
 use std::process::ExitCode;
+use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 use rusty_dragon::board::Position;
-use rusty_dragon::perft;
-use rusty_dragon::{ENGINE_NAME, ENGINE_VERSION};
+use rusty_dragon::{perft, uci};
 
-const USAGE: &str = "usage: rusty-dragon perft <depth> [fen]";
+const USAGE: &str = "usage: rusty-dragon [perft <depth> [fen]]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     match args.split_first() {
-        None => {
-            println!("{ENGINE_NAME} {ENGINE_VERSION}");
-            ExitCode::SUCCESS
-        }
+        None => run_uci(),
         Some((command, rest)) if command == "perft" => run_perft(rest),
         Some(_) => fail(USAGE),
+    }
+}
+
+/// No arguments: talk UCI over stdin and stdout until `quit`.
+fn run_uci() -> ExitCode {
+    match uci::run(|| io::stdin().lock(), io::stdout().lock()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => fail(&format!("UCI I/O error: {e}")),
     }
 }
 
@@ -34,16 +40,16 @@ fn run_perft(args: &[String]) -> ExitCode {
     };
 
     let start = Instant::now();
-    let split = perft::parallel_divide(&pos, depth);
-    let nodes: u64 = if depth == 0 { 1 } else { split.iter().map(|&(_, n)| n).sum() };
+    // Nothing sets the flag: Ctrl-C ends the whole process.
+    let split = match perft::parallel_divide(&pos, depth, &AtomicBool::new(false)) {
+        Ok(split) => split,
+        Err(e) => return fail(&e.to_string()),
+    };
     let elapsed = start.elapsed();
 
-    for (mv, n) in &split {
-        println!("{mv}: {n}");
-    }
     #[expect(clippy::cast_precision_loss, reason = "only for display")]
-    let nps = nodes as f64 / elapsed.as_secs_f64().max(f64::EPSILON);
-    println!("\nNodes: {nodes}\nTime: {:.3} s\nNPS: {nps:.0}", elapsed.as_secs_f64());
+    let nps = split.nodes() as f64 / elapsed.as_secs_f64().max(f64::EPSILON);
+    println!("{split}\nTime: {:.3} s\nNPS: {nps:.0}", elapsed.as_secs_f64());
     ExitCode::SUCCESS
 }
 

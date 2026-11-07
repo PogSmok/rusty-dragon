@@ -31,19 +31,10 @@ impl Position {
 
     /// Finds the legal move written in UCI notation, e.g. `e2e4`, `e1g1` or `e7e8q`.
     /// Generates every legal move to do it, so it's meant for input, not for search.
+    /// To look up several moves in one position, generate once and use [`MoveList::find_uci`].
     #[must_use]
     pub fn parse_uci_move(&self, uci: &str) -> Option<Move> {
-        let from: Square = uci.get(0..2)?.parse().ok()?;
-        let to: Square = uci.get(2..4)?.parse().ok()?;
-        let promotion = match uci.as_bytes()[4..] {
-            [] => None,
-            [c] => Some(PieceKind::from_char(char::from(c))?),
-            _ => return None,
-        };
-        self.legal_moves()
-            .iter()
-            .copied()
-            .find(|mv| mv.from() == from && mv.to() == to && mv.promotion() == promotion)
+        self.legal_moves().find_uci(uci)
     }
 
     /// The side to move's pawns that can legally capture en passant onto `ep`.
@@ -538,6 +529,7 @@ mod tests {
         assert!(mv.is_capture());
         assert_eq!(pos.parse_uci_move("a7a8"), None, "promotion piece is required");
         assert_eq!(pos.parse_uci_move("a7a8k"), None);
-        assert_eq!(pos.parse_uci_move("a7a8Q"), None, "UCI uses lowercase");
+        assert_eq!(pos.parse_uci_move("a7b8R"), Some(mv), "uppercase is accepted");
+        assert_eq!(pos.parse_uci_move("A7B8R"), Some(mv), "uppercase is accepted");
     }
 }

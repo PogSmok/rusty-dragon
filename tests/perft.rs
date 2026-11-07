@@ -1,7 +1,9 @@
 //! Perft against published node counts.
 
+use std::sync::atomic::AtomicBool;
+
 use rusty_dragon::board::Position;
-use rusty_dragon::perft::parallel_perft;
+use rusty_dragon::perft::parallel_divide;
 
 /// Perft suite from the Chess Programming Wiki (<https://www.chessprogramming.org/Perft_Results>).
 /// Each position is a FEN string and a list of node counts at depths 1 through 6.
@@ -68,7 +70,8 @@ const SPECIAL_RULES: &[(&str, u32, u64)] = &[
 
 fn check(fen: &str, depth: u32, expected: u64) {
     let pos = Position::from_fen(fen).expect("valid FEN");
-    assert_eq!(parallel_perft(&pos, depth), expected, "perft({depth}) of {fen}");
+    let split = parallel_divide(&pos, depth, &AtomicBool::new(false)).expect("valid depth");
+    assert_eq!(split.nodes(), expected, "perft({depth}) of {fen}");
 }
 
 #[test]
