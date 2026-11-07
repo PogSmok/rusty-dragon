@@ -2,8 +2,9 @@ use std::fmt;
 use std::mem::MaybeUninit;
 use std::ops::Deref;
 use std::slice;
+use std::str;
 
-use super::Move;
+use super::{Move, PieceKind, Square};
 
 /// Fixed-capacity move buffer, so move generation never allocates.
 ///
@@ -46,6 +47,28 @@ impl MoveList {
     pub fn as_slice(&self) -> &[Move] {
         // SAFETY: the first `len` slots are initialized
         unsafe { slice::from_raw_parts(self.moves.as_ptr().cast::<Move>(), self.len) }
+    }
+
+    /// The move in the list written in UCI notation, e.g. `e2e4`, `e1g1` or `e7e8q`.
+    #[must_use]
+    pub fn find_uci(&self, uci: &str) -> Option<Move> {
+        // UCI uses lowercase, but some GUIs don't follow that convention.
+        let mut buf = [0; 5];
+        let lower = buf.get_mut(..uci.len())?;
+        lower.copy_from_slice(uci.as_bytes());
+        lower.make_ascii_lowercase();
+        let uci = str::from_utf8(lower).ok()?;
+
+        let from: Square = uci.get(0..2)?.parse().ok()?;
+        let to: Square = uci.get(2..4)?.parse().ok()?;
+        let promotion = match uci.as_bytes()[4..] {
+            [] => None,
+            [c] => Some(PieceKind::from_char(char::from(c))?),
+            _ => return None,
+        };
+        self.iter()
+            .copied()
+            .find(|mv| mv.from() == from && mv.to() == to && mv.promotion() == promotion)
     }
 }
 
@@ -93,7 +116,7 @@ impl fmt::Debug for MoveList {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::board::{MoveKind, Square};
+    use crate::board::MoveKind;
 
     #[test]
     fn push_and_iterate() {
@@ -107,6 +130,22 @@ mod tests {
         assert_eq!(list.as_slice(), [a, b]);
         assert_eq!((&list).into_iter().copied().collect::<Vec<_>>(), [a, b]);
         assert_eq!(format!("{list:?}"), "[Move(e2e4), Move(g1f3)]");
+    }
+
+    #[test]
+    fn find_uci_matches_squares_and_promotion_in_any_case() {
+        let mut list = MoveList::new();
+        let push = Move::new(Square::E2, Square::E4, MoveKind::DoublePush);
+        let promotion = Move::new(Square::A7, Square::A8, MoveKind::QueenPromotion);
+        list.push(push);
+        list.push(promotion);
+        assert_eq!(list.find_uci("e2e4"), Some(push));
+        assert_eq!(list.find_uci("E2E4"), Some(push));
+        assert_eq!(list.find_uci("a7a8q"), Some(promotion));
+        assert_eq!(list.find_uci("A7A8Q"), Some(promotion));
+        for bad in ["", "e2", "e2e5", "a7a8", "a7a8n", "a7a8x", "e2e4 ", "é2e4", "e2e4qq"] {
+            assert_eq!(list.find_uci(bad), None, "{bad:?}");
+        }
     }
 
     #[test]

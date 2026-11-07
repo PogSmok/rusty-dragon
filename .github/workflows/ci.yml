@@ -128,7 +128,15 @@ jobs:
         if: matrix.release
         run: |
           cargo build --release --locked ${{ matrix.args }}
-          ./target/release/rusty-dragon
+          out=$(printf 'uci\nisready\nposition startpos moves e2e4\ngo depth 1\nquit\n' \
+            | timeout 60 ./target/release/rusty-dragon)
+          echo "$out"
+          for want in uciok readyok 'bestmove '; do
+            grep -q "^$want" <<<"$out" || { echo "::error::no \"$want\" reply"; exit 1; }
+          done
+          # Captured first, so a crash or timeout fails the step instead of being hidden by grep.
+          out=$(timeout 60 ./target/release/rusty-dragon perft 4)
+          grep -qx 'Nodes searched: 197281' <<<"$out" || { echo "::error::wrong perft 4 count"; exit 1; }
 
   ci-ok:
     if: always()
