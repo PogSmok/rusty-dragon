@@ -81,6 +81,7 @@ impl Position {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::positions::{KIWIPETE, POSITION_3, POSITION_4, STARTPOS};
 
     /// Plays UCI `moves` from `fen` and returns the resulting FEN.
     fn play(fen: &str, moves: &[&str]) -> String {
@@ -107,7 +108,7 @@ mod tests {
         );
         // No black pawn can, so no en passant square.
         assert_eq!(
-            play(Position::STARTPOS_FEN, &["e2e4"]),
+            play(STARTPOS, &["e2e4"]),
             "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
         );
         assert_eq!(
@@ -115,7 +116,7 @@ mod tests {
             "4k3/8/8/2pP4/8/8/8/4K3 w - c6 0 2"
         );
         assert_eq!(
-            play(Position::STARTPOS_FEN, &["e2e4", "c7c5", "g1f3"]),
+            play(STARTPOS, &["e2e4", "c7c5", "g1f3"]),
             "rnbqkbnr/pp1ppppp/8/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2"
         );
     }
@@ -174,12 +175,7 @@ mod tests {
 
     #[test]
     fn zobrist_key_stays_in_sync_through_every_kind_of_move() {
-        for fen in [
-            Position::STARTPOS_FEN,
-            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
-            "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
-            "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
-        ] {
+        for fen in [STARTPOS, KIWIPETE, POSITION_3, POSITION_4] {
             check_zobrist_keys(&Position::from_fen(fen).expect("valid FEN"), 3);
         }
     }
