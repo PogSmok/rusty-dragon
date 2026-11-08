@@ -54,6 +54,9 @@ impl Bitboard {
         Self::RANK_8,
     ];
 
+    pub const LIGHT_SQUARES: Self = Self(0x55AA_55AA_55AA_55AA);
+    pub const DARK_SQUARES: Self = Self(!Self::LIGHT_SQUARES.0);
+
     #[inline]
     pub const fn from_square(square: Square) -> Self {
         Self(1 << square.index())
@@ -294,6 +297,16 @@ impl fmt::Display for Bitboard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn square_colors_alternate_like_the_board() {
+        for square in Square::ALL {
+            // A square is dark when its file and rank are both even or both odd.
+            let dark = (square.file().index() + square.rank().index()) % 2 == 0;
+            assert_eq!(Bitboard::DARK_SQUARES.contains(square), dark, "{square}");
+            assert_eq!(Bitboard::LIGHT_SQUARES.contains(square), !dark, "{square}");
+        }
+    }
 
     fn bb(square: Square) -> Bitboard {
         Bitboard::from_square(square)

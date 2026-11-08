@@ -1,4 +1,5 @@
 pub mod board;
+pub mod eval;
 pub mod perft;
 pub mod positions;
 pub mod uci;

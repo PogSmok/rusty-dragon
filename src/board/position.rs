@@ -4,6 +4,7 @@ use super::{
     Bitboard, CastlingRights, Color, File, Piece, PieceKind, Rank, Square, bishop_attacks,
     king_attacks, knight_attacks, pawn_attacks, rook_attacks, zobrist,
 };
+use crate::eval::{self, Tapered};
 
 mod fen;
 mod make_move;
@@ -11,60 +12,75 @@ mod movegen;
 
 pub use fen::FenError;
 
+/// Each side starts with 16 pieces, and none can be added.
+/// The piece-square total's `i16` halves rely on it, so FEN parsing rejects more and the board
+/// writes check it in debug builds.
+pub(crate) const MAX_PIECES_PER_SIDE: u32 = 16;
+
 /// Full game state.
 #[derive(Clone, PartialEq, Eq, Debug)]
+#[repr(C)]
 #[must_use]
 pub struct Position {
-    /// Zobrist key of everything below but the move counters.
+    /// Zobrist key of the pieces, side to move, castling rights and en passant square.
     /// Kept in sync by the board and state writes, the only code that changes what it covers.
     /// First, so the derived `PartialEq` rejects unequal positions on one comparison.
     zobrist_key: u64,
-
     /// Squares occupied by each piece kind (both colors), indexed by `PieceKind`.
     by_kind: [Bitboard; 6],
     /// Squares occupied by each color, indexed by `Color`.
+    /// Right after `by_kind`, since `pieces(color, kind)` reads both.
     by_color: [Bitboard; 2],
-    /// Piece on each square, indexed by `Square`. Kept in sync with the bitboards.
-    board_mailbox: [Option<Piece>; 64],
-
+    /// Material and piece-square total from White's view. Kept in sync by the board writes.
+    psqt: Tapered,
     side_to_move: Color,
     castling_rights: CastlingRights,
     /// Square a pawn skipped over on the previous double push, if any.
     en_passant: Option<Square>,
+    /// Game phase of the pieces on the board, uncapped: see [`eval::phase_weight`].
+    /// Kept in sync by the board writes. It fills what would otherwise be a padding byte.
+    phase: u8,
     /// Plies since the last capture or pawn move (fifty-move rule).
     halfmove_clock: u16,
     /// Starts at 1 and increments after Black's move.
     fullmove_number: u16,
+    /// Piece on each square, indexed by `Square`. Kept in sync with the bitboards.
+    board_mailbox: [Option<Piece>; 64],
 }
 
 impl Position {
-    /// No pieces, White to move, no castling rights, move 1. Its Zobrist key is 0.
+    /// No pieces, White to move, no castling rights, move 1. Its Zobrist key and
+    /// piece-square total are 0.
     const EMPTY: Self = Self {
         zobrist_key: 0,
         by_kind: [Bitboard::EMPTY; 6],
         by_color: [Bitboard::EMPTY; 2],
-        board_mailbox: [None; 64],
+        psqt: Tapered::ZERO,
         side_to_move: Color::White,
         castling_rights: CastlingRights::NONE,
         en_passant: None,
+        phase: 0,
         halfmove_clock: 0,
         fullmove_number: 1,
+        board_mailbox: [None; 64],
     };
-
-    // Board writes. These three are the only code that modifies `by_kind`, `by_color`
-    // and `board_mailbox`, so the representations and the pieces' part of the Zobrist key can
-    // never drift apart.
 
     /// Puts `piece` on the empty square `square`.
     #[inline]
     fn put_piece(&mut self, square: Square, piece: Piece) {
         debug_assert!(self.board_mailbox[square.index()].is_none(), "square already occupied");
+        debug_assert!(
+            self.by_color[piece.color().index()].popcount() < MAX_PIECES_PER_SIDE,
+            "a side would have more than {MAX_PIECES_PER_SIDE} pieces"
+        );
 
         let bb = Bitboard::from_square(square);
         self.by_color[piece.color().index()] |= bb;
         self.by_kind[piece.kind().index()] |= bb;
         self.board_mailbox[square.index()] = Some(piece);
         self.zobrist_key ^= zobrist::piece(piece, square);
+        self.psqt += eval::piece_square(piece, square);
+        self.phase += eval::phase_weight(piece.kind());
 
         self.debug_check_square(square);
     }
@@ -78,6 +94,8 @@ impl Position {
         self.by_color[piece.color().index()] &= bb;
         self.by_kind[piece.kind().index()] &= bb;
         self.zobrist_key ^= zobrist::piece(piece, square);
+        self.psqt -= eval::piece_square(piece, square);
+        self.phase -= eval::phase_weight(piece.kind());
 
         self.debug_check_square(square);
         Some(piece)
@@ -94,6 +112,7 @@ impl Position {
         self.by_kind[piece.kind().index()] ^= mask;
         self.board_mailbox[to.index()] = Some(piece);
         self.zobrist_key ^= zobrist::piece(piece, from) ^ zobrist::piece(piece, to);
+        self.psqt += eval::piece_square(piece, to) - eval::piece_square(piece, from);
 
         self.debug_check_square(from);
         self.debug_check_square(to);
@@ -125,20 +144,26 @@ impl Position {
         self.en_passant = square;
     }
 
-    /// The Zobrist key computed from scratch, which the kept one must always equal.
-    /// Read from the bitboards, while the board writes hash what they put in the mailbox,
-    /// so a check against it also compares the two.
-    fn compute_zobrist_key(&self) -> u64 {
+    /// The Zobrist key, piece-square total and phase computed from scratch, which the kept
+    /// ones must always equal, in one pass over the pieces.
+    /// Read from the bitboards, while the board writes update them from what they put in the
+    /// mailbox, so a check against them also compares the two.
+    fn compute_incremental(&self) -> Incremental {
         let mut zobrist_key = zobrist::castling(self.castling_rights);
+        let mut psqt = Tapered::ZERO;
+        let mut phase = 0;
         for piece in Piece::ALL {
             for square in self.pieces(piece.color(), piece.kind()) {
                 zobrist_key ^= zobrist::piece(piece, square);
+                psqt += eval::piece_square(piece, square);
+                phase += eval::phase_weight(piece.kind());
             }
         }
         if self.side_to_move == Color::Black {
             zobrist_key ^= zobrist::black_to_move();
         }
-        zobrist_key ^ zobrist::en_passant(self.en_passant)
+        zobrist_key ^= zobrist::en_passant(self.en_passant);
+        Incremental { zobrist_key, psqt, phase }
     }
 
     #[inline]
@@ -149,15 +174,19 @@ impl Position {
     }
 
     #[inline]
-    fn debug_check_zobrist_key(&self) {
+    fn debug_check_incremental(&self) {
         if cfg!(debug_assertions) {
-            self.assert_zobrist_key_current();
+            self.assert_incremental_current();
         }
     }
 
-    /// Panics if the kept Zobrist key differs from the one computed from scratch.
-    fn assert_zobrist_key_current(&self) {
-        assert_eq!(self.zobrist_key, self.compute_zobrist_key(), "Zobrist key is out of date");
+    /// Panics if the kept Zobrist key, piece-square total or phase differs from the one
+    /// computed from scratch.
+    fn assert_incremental_current(&self) {
+        let fresh = self.compute_incremental();
+        assert_eq!(self.zobrist_key, fresh.zobrist_key, "Zobrist key is out of date");
+        assert_eq!(self.psqt, fresh.psqt, "piece-square total is out of date");
+        assert_eq!(self.phase, fresh.phase, "phase is out of date");
     }
 
     /// Panics if the bitboards and the mailbox disagree about `square`.
@@ -176,13 +205,13 @@ impl Position {
     }
 
     /// Panics if the bitboards and the mailbox disagree anywhere on the board, or the Zobrist
-    /// key is out of date.
+    /// key, piece-square total or phase is out of date.
     #[cfg_attr(not(test), expect(dead_code, reason = "only used by tests"))]
     fn assert_consistent(&self) {
         for square in Square::ALL {
             self.assert_square_consistent(square);
         }
-        self.assert_zobrist_key_current();
+        self.assert_incremental_current();
     }
 
     #[inline]
@@ -288,6 +317,47 @@ impl Position {
     pub const fn zobrist_key(&self) -> u64 {
         self.zobrist_key
     }
+
+    /// Material and piece-square total from White's view, kept up to date as pieces move.
+    /// See [`eval`].
+    #[inline]
+    pub const fn psqt(&self) -> Tapered {
+        self.psqt
+    }
+
+    /// Game phase of the pieces on the board, uncapped.
+    #[inline]
+    #[must_use]
+    pub(crate) const fn phase(&self) -> u8 {
+        self.phase
+    }
+
+    /// Whether neither side has enough material to ever checkmate.
+    #[inline]
+    #[must_use]
+    pub fn is_insufficient_material(&self) -> bool {
+        let majors_and_pawns = self.pieces_of_kind(PieceKind::Pawn)
+            | self.pieces_of_kind(PieceKind::Rook)
+            | self.pieces_of_kind(PieceKind::Queen);
+        if !majors_and_pawns.is_empty() {
+            return false;
+        }
+        let bishops = self.pieces_of_kind(PieceKind::Bishop);
+        match self.pieces_of_kind(PieceKind::Knight).popcount() {
+            0 => {
+                !bishops.intersects(Bitboard::DARK_SQUARES)
+                    || !bishops.intersects(Bitboard::LIGHT_SQUARES)
+            }
+            1 => bishops.is_empty(),
+            _ => false,
+        }
+    }
+}
+
+struct Incremental {
+    zobrist_key: u64,
+    psqt: Tapered,
+    phase: u8,
 }
 
 /// Prints the board with rank 8 at the top, FEN letters for pieces and `.` for empty squares.
@@ -315,7 +385,38 @@ mod tests {
 
     #[test]
     fn size_is_compact() {
-        assert_eq!(size_of::<Position>(), 144);
+        assert_eq!(size_of::<Position>(), 152);
+    }
+
+    #[test]
+    fn hot_fields_are_one_contiguous_run() {
+        use std::mem::offset_of;
+        assert_eq!(offset_of!(Position, by_kind), 8);
+        assert_eq!(offset_of!(Position, by_color), 8 + 48);
+        assert_eq!(offset_of!(Position, psqt), 8 + 48 + 16);
+        assert_eq!(offset_of!(Position, side_to_move), 8 + 48 + 16 + 4);
+        // The phase fills the byte that would otherwise be padding before the move counters.
+        assert_eq!(offset_of!(Position, phase), 8 + 48 + 16 + 4 + 3);
+        assert_eq!(offset_of!(Position, halfmove_clock), 8 + 48 + 16 + 4 + 4);
+        // The mailbox, read less often, comes after.
+        assert!(offset_of!(Position, board_mailbox) > offset_of!(Position, side_to_move));
+    }
+
+    #[test]
+    fn insufficient_material() {
+        let insufficient =
+            |fen| Position::from_fen(fen).expect("valid FEN").is_insufficient_material();
+        assert!(insufficient("4k3/8/8/8/8/8/8/4K3 w - - 0 1"));
+        assert!(insufficient("4k3/8/8/8/8/8/8/2B1K3 w - - 0 1"));
+        assert!(insufficient("4k3/8/8/8/8/8/8/2N1K3 b - - 0 1"));
+        assert!(!insufficient("4k3/8/8/8/8/8/8/1NN1K3 w - - 0 1"), "two minors might mate");
+        assert!(!insufficient("2b1k3/8/8/8/8/8/8/2B1K3 w - - 0 1"), "opposite-color bishops");
+        assert!(!insufficient("4k3/8/8/8/8/8/8/1NB1K3 w - - 0 1"), "knight and bishop");
+        assert!(insufficient("2b1k3/8/8/8/8/8/8/4KB2 w - - 0 1"), "both bishops on light squares");
+        assert!(insufficient("4k3/8/8/8/8/8/8/B1B1K3 w - - 0 1"), "both bishops on dark squares");
+        assert!(!insufficient("4k3/8/8/8/8/8/P7/4K3 w - - 0 1"));
+        assert!(!insufficient("4k3/8/8/8/8/8/8/R3K3 w - - 0 1"));
+        assert!(!insufficient(crate::positions::STARTPOS));
     }
 
     #[test]

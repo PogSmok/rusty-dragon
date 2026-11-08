@@ -11,7 +11,7 @@ use std::sync::mpsc::{self, Sender};
 use std::thread::{self, JoinHandle};
 
 use crate::board::{FenError, Move, Position};
-use crate::{ENGINE_AUTHOR, ENGINE_NAME, ENGINE_VERSION, perft};
+use crate::{ENGINE_AUTHOR, ENGINE_NAME, ENGINE_VERSION, eval, perft};
 
 mod command;
 
@@ -20,8 +20,9 @@ pub use command::{Command, Go, ParseError};
 const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
 
 /// Reads commands from the input `open_input` returns until `quit` or the end of input, writing
-/// replies to `output`. Fails only if reading or writing fails; bad commands are reported to
-/// the GUI and skipped. `quit` stops a running `go perft`; the end of input lets it finish.
+/// replies to `output`.
+/// Fails only if reading or writing fails; bad commands are reported to the GUI and skipped.
+/// `quit` stops a running `go perft`; the end of input lets it finish.
 pub fn run<R: BufRead>(
     open_input: impl FnOnce() -> R + Send + 'static,
     output: impl Write,
@@ -80,8 +81,8 @@ enum Event {
     BadInput(io::Error),
     /// The input ended, or reading it failed for good.
     InputEnd(io::Result<()>),
-    /// The perft thread with this id is about to exit. Its result is only reported once: this
-    /// may be a perft that was already stopped and reported.
+    /// The perft thread with this id is about to exit.
+    /// Its result is only reported once: this may be a perft that was already stopped and reported.
     PerftDone(u64),
 }
 
@@ -267,6 +268,7 @@ impl<W: Write> Session<W> {
             Command::Display => {
                 writeln!(self.out, "{}\n\nFen: {}", self.position, self.position.to_fen())?;
             }
+            Command::Eval => writeln!(self.out, "{}", eval::Breakdown::of(&self.position))?,
         }
         Ok(ControlFlow::Continue(()))
     }
@@ -476,6 +478,16 @@ mod tests {
         let out = session("position startpos moves e2e4\nposition fen 8/8/8 w - - 0 1\nd\n");
         assert!(out.starts_with("info string invalid FEN: expected 8 ranks, got 3\n"));
         assert!(out.ends_with("Fen: rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1\n"));
+    }
+
+    #[test]
+    fn eval_prints_the_breakdown() {
+        let out = session("position startpos moves e2e4\neval\n");
+        assert!(out.starts_with("Middlegame: "), "{out}");
+        let mut pos = Position::startpos();
+        pos.make_move(pos.parse_uci_move("e2e4").expect("legal"));
+        let expected = eval::evaluate(&pos);
+        assert!(out.ends_with(&format!("Evaluation: {expected} (side to move)\n")), "{out}");
     }
 
     #[test]

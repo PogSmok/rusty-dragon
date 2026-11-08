@@ -2,7 +2,7 @@ use std::error::Error;
 use std::fmt;
 use std::str::FromStr;
 
-use super::Position;
+use super::{MAX_PIECES_PER_SIDE, Position};
 use crate::board::{
     Bitboard, Castle, CastlingRights, Color, File, ParseSquareError, Piece, PieceKind, Rank, Square,
 };
@@ -32,6 +32,8 @@ pub enum FenError {
     IllegalEnPassant(Square),
     /// Halfmove clock or fullmove number is not a valid number.
     Clock(String),
+    /// A side has more than the 16 pieces it starts with, which no game can reach.
+    TooManyPieces(Color),
     /// Not exactly one king per side.
     Kings,
     /// A pawn on rank 1 or 8.
@@ -59,6 +61,9 @@ impl fmt::Display for FenError {
                 write!(f, "en passant square {sq} does not follow a double pawn push")
             }
             Self::Clock(s) => write!(f, "invalid move counter {s:?}"),
+            Self::TooManyPieces(color) => {
+                write!(f, "{color:?} has more than {MAX_PIECES_PER_SIDE} pieces")
+            }
             Self::Kings => write!(f, "each side must have exactly one king"),
             Self::PawnRank => write!(f, "pawns cannot be on rank 1 or 8"),
             Self::OpponentInCheck => write!(f, "the side not to move is in check"),
@@ -81,9 +86,11 @@ impl Position {
         Self::from_fen(positions::STARTPOS).expect("STARTPOS is valid")
     }
 
-    /// Parses a FEN string. The halfmove clock and fullmove number may be left out, in which
-    /// case they default to `0` and `1`. EPD operations after the first four fields (`bm`,
-    /// `id`, ...) are not accepted and must be stripped by the caller.
+    /// Parses a FEN string.
+    /// The halfmove clock and fullmove number may be left out, in which case they default to `0`
+    /// and `1`.
+    /// EPD operations after the first four fields (`bm`, `id`, ...) are not accepted and must be
+    /// stripped by the caller.
     pub fn from_fen(fen: &str) -> Result<Self, FenError> {
         let fields: Vec<&str> = fen.split_whitespace().collect();
         let (placement, side, castling, en_passant, halfmove, fullmove) = match *fields {
@@ -98,21 +105,34 @@ impl Position {
 
         // Parse every field first, so a malformed field is reported before a problem with the
         // position itself.
-        let mut pos = Self::EMPTY;
-        pos.parse_placement(placement)?;
+        let (board, counts) = parse_placement(placement)?;
         let side = match side {
             "w" => Color::White,
             "b" => Color::Black,
             _ => return Err(FenError::SideToMove(side.to_string())),
         };
-        pos.set_side_to_move(side);
         let castling_rights = parse_castling(castling)?;
         let en_passant = match en_passant {
             "-" => None,
             square => Some(square.parse().map_err(FenError::EnPassant)?),
         };
-        pos.halfmove_clock = parse_clock(halfmove)?;
-        pos.fullmove_number = parse_fullmove(fullmove)?;
+        let halfmove_clock = parse_clock(halfmove)?;
+        let fullmove_number = parse_fullmove(fullmove)?;
+
+        if let Some(color) =
+            Color::ALL.into_iter().find(|c| counts[c.index()] > MAX_PIECES_PER_SIDE)
+        {
+            return Err(FenError::TooManyPieces(color));
+        }
+        let mut pos = Self::EMPTY;
+        for (square, piece) in Square::ALL.into_iter().zip(board) {
+            if let Some(piece) = piece {
+                pos.put_piece(square, piece);
+            }
+        }
+        pos.set_side_to_move(side);
+        pos.halfmove_clock = halfmove_clock;
+        pos.fullmove_number = fullmove_number;
 
         pos.validate_pieces()?;
         let castling_rights = pos.validate_castling(castling_rights)?;
@@ -123,7 +143,7 @@ impl Position {
         };
         pos.set_en_passant(en_passant);
         pos.validate_opponent_not_in_check()?;
-        pos.debug_check_zobrist_key();
+        pos.debug_check_incremental();
         Ok(pos)
     }
 
@@ -161,33 +181,6 @@ impl Position {
             "{placement} {side} {} {en_passant} {} {}",
             self.castling_rights, self.halfmove_clock, self.fullmove_number
         )
-    }
-
-    /// Fills the board from the first FEN field, rank 8 first.
-    fn parse_placement(&mut self, placement: &str) -> Result<(), FenError> {
-        let ranks: Vec<&str> = placement.split('/').collect();
-        if ranks.len() != 8 {
-            return Err(FenError::RankCount(ranks.len()));
-        }
-
-        for (row, rank) in ranks.into_iter().zip(Rank::ALL.into_iter().rev()) {
-            let mut file = 0;
-            for c in row.chars() {
-                if let Some(skip @ 1..=8) = c.to_digit(10) {
-                    file += skip as usize;
-                } else {
-                    let piece = Piece::from_char(c).ok_or(FenError::Piece(c))?;
-                    if file < 8 {
-                        self.put_piece(Square::from_file_rank(File::from_index(file), rank), piece);
-                    }
-                    file += 1;
-                }
-            }
-            if file != 8 {
-                return Err(FenError::RankLength(file));
-            }
-        }
-        Ok(())
     }
 
     /// Rejects piece placements that can't occur in a game.
@@ -233,9 +226,9 @@ impl Position {
         if illegal.is_empty() { Ok(rights) } else { Err(FenError::IllegalCastling(illegal)) }
     }
 
-    /// Checks that `square` is one the opponent's pawn just skipped with a double push. Returns
-    /// it only if the side to move has a legal en passant capture there, as `make_move` would
-    /// record it, so equal positions compare equal however they were set up.
+    /// Checks that `square` is one the opponent's pawn just skipped with a double push.
+    /// Returns it only if the side to move has a legal en passant capture there, as `make_move`
+    /// would record it, so equal positions compare equal however they were set up.
     /// Needs `validate_pieces` first, so each side has exactly one king.
     fn validate_en_passant(&self, square: Square) -> Result<Option<Square>, FenError> {
         let us = self.side_to_move;
@@ -251,6 +244,37 @@ impl Position {
         }
         Ok(self.has_legal_en_passant(square).then_some(square))
     }
+}
+
+/// Extracts piece position (indexed by `Square`) and piece count (indexed by `Color`) form FEN.
+fn parse_placement(placement: &str) -> Result<([Option<Piece>; 64], [u32; 2]), FenError> {
+    let ranks: Vec<&str> = placement.split('/').collect();
+    if ranks.len() != 8 {
+        return Err(FenError::RankCount(ranks.len()));
+    }
+
+    let mut board = [None; 64];
+    let mut counts = [0; 2];
+    for (row, rank) in ranks.into_iter().zip(Rank::ALL.into_iter().rev()) {
+        let mut file = 0;
+        for c in row.chars() {
+            if let Some(skip @ 1..=8) = c.to_digit(10) {
+                file += skip as usize;
+            } else {
+                let piece = Piece::from_char(c).ok_or(FenError::Piece(c))?;
+                if file < 8 {
+                    board[Square::from_file_rank(File::from_index(file), rank).index()] =
+                        Some(piece);
+                    counts[piece.color().index()] += 1;
+                }
+                file += 1;
+            }
+        }
+        if file != 8 {
+            return Err(FenError::RankLength(file));
+        }
+    }
+    Ok((board, counts))
 }
 
 fn parse_castling(field: &str) -> Result<CastlingRights, FenError> {
@@ -475,6 +499,25 @@ mod tests {
         assert_eq!(fen_error("4k3/8/8/8/8/8/8/4KK2 w - - 0 1"), FenError::Kings);
         assert_eq!(fen_error("4k3/8/8/8/8/8/8/P3K3 w - - 0 1"), FenError::PawnRank);
         assert_eq!(fen_error("p3k3/8/8/8/8/8/8/4K3 w - - 0 1"), FenError::PawnRank);
+    }
+
+    #[test]
+    fn rejects_more_than_16_pieces_a_side() {
+        // 48 queens would overflow the piece-square total if they were placed.
+        let queens = "k7/QQQQQQQQ/QQQQQQQQ/QQQQQQQQ/QQQQQQQQ/QQQQQQQQ/QQQQQQQQ/7K b - - 0 1";
+        assert_eq!(fen_error(queens), FenError::TooManyPieces(Color::White));
+        let black = "K7/qqqqqqqq/qqqqqqqq/qqqqqqqq/8/8/8/7k w - - 0 1";
+        assert_eq!(fen_error(black), FenError::TooManyPieces(Color::Black));
+        // A malformed field is still reported first.
+        assert_eq!(fen_error(&queens.replace(" b ", " x ")), FenError::SideToMove("x".into()));
+        let bad_piece = queens.replacen("QQQQQQQQ", "QQZ5", 1);
+        assert_eq!(fen_error(&bad_piece), FenError::Piece('Z'));
+        // Exactly 16 pieces is fine: the start position.
+        assert!(Position::from_fen(STARTPOS).is_ok());
+        assert_eq!(
+            FenError::TooManyPieces(Color::Black).to_string(),
+            "Black has more than 16 pieces"
+        );
     }
 
     #[test]

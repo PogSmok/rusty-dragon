@@ -43,6 +43,8 @@ pub enum Command<'a> {
     Quit,
     /// `d`: print the board and its FEN. Not part of UCI.
     Display,
+    /// `eval`: print how the static evaluation scores the position. Not part of UCI.
+    Eval,
 }
 
 /// Search limits of a `go` command. A limit left out is `None`, or `false`/empty.
@@ -160,6 +162,7 @@ impl<'a> Command<'a> {
                 "ponderhit" => Self::PonderHit,
                 "quit" => Self::Quit,
                 "d" => Self::Display,
+                "eval" => Self::Eval,
                 _ => {
                     rest = args;
                     continue;
@@ -246,8 +249,8 @@ fn millis(tokens: &mut Tokens<'_>) -> Option<Duration> {
     number::<i64>(tokens).map(|ms| Duration::from_millis(u64::try_from(ms).unwrap_or(0)))
 }
 
-/// Splits off the first whitespace-delimited token. The rest keeps its leading whitespace.
-/// `None` if `s` is blank.
+/// Splits off the first whitespace-delimited token.
+/// The rest keeps its leading whitespace. `None` if `s` is blank.
 fn split_token(s: &str) -> Option<(&str, &str)> {
     let s = s.trim_start();
     if s.is_empty() {
@@ -307,10 +310,11 @@ mod tests {
             Command::PonderHit => "ponderhit",
             Command::Quit => "quit",
             Command::Display => "d",
+            Command::Eval => "eval",
         }
     }
 
-    const EXAMPLES: [&str; 13] = [
+    const EXAMPLES: [&str; 14] = [
         "uci",
         "debug on",
         "isready",
@@ -324,6 +328,7 @@ mod tests {
         "ponderhit",
         "quit",
         "d",
+        "eval",
     ];
 
     #[test]
