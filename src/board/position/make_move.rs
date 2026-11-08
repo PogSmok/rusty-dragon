@@ -74,7 +74,7 @@ impl Position {
             !self.is_attacked(self.king_square(us), self.side_to_move),
             "{mv} left the king in check"
         );
-        self.debug_check_zobrist_key();
+        self.debug_check_incremental();
     }
 }
 

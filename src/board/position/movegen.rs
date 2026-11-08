@@ -2,8 +2,9 @@
 //!
 //! Moves are generated legal up front rather than filtered after making them: check evasions
 //! are restricted to blocking or capturing the checker, pinned pieces stay on their pin line
-//! and the king never steps onto an attacked square. En passant, which removes two pieces from
-//! a line at once, is the one move checked by testing the resulting occupancy.
+//! and the king never steps onto an attacked square.
+//! En passant, which removes two pieces from a line at once, is the one move checked by testing the
+//! resulting occupancy.
 
 use super::Position;
 use crate::board::{
@@ -18,8 +19,8 @@ const PROMOTIONS: [PieceKind; 4] =
 
 impl Position {
     /// Every legal move for the side to move: all captures and promotions first (en passant
-    /// included), then all quiet moves (castling included). No order is guaranteed within
-    /// each group.
+    /// included), then all quiet moves (castling included).
+    /// No order is guaranteed within each group.
     pub fn legal_moves(&self) -> MoveList {
         // One pass over the pieces, with quiet moves held back and appended after the captures.
         let mut moves = MoveList::new();
@@ -299,8 +300,9 @@ impl<'a> MoveGen<'a> {
     }
 
     /// Only called when not in check, so `danger` seeing through our king doesn't matter: a
-    /// slider attacking past it would be giving check. `king_targets` already says whether the
-    /// square the king passes over (next to it) is safe; only the landing square needs checking.
+    /// slider attacking past it would be giving check.
+    /// `king_targets` already says whether the square the king passes over (next to it) is safe;
+    /// only the landing square needs checking.
     fn castling(&self, moves: &mut MoveList, king_targets: Bitboard, danger: &KingDanger) {
         let rights = self.pos.castling_rights();
         for castle in Castle::of(self.us) {
@@ -316,8 +318,9 @@ impl<'a> MoveGen<'a> {
             if between(castle.king_from, castle.rook_from).intersects(self.occupied) {
                 continue;
             }
-            // The king may not pass through or land on an attacked square. The square it
-            // passes over is empty, so `king_targets` holds it exactly when it's safe.
+            // The king may not pass through or land on an attacked square.
+            // The square it passes over is empty, so `king_targets` holds it exactly when it's
+            // safe.
             let passed = between(castle.king_from, castle.king_to);
             if !passed.difference(king_targets).is_empty() || danger.attacks(castle.king_to) {
                 continue;

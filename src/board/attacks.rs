@@ -36,6 +36,8 @@ const SLIDER_TABLE_SIZE: usize = {
 };
 
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(pext, repr(align(16)))]
+#[cfg_attr(not(pext), repr(align(32)))]
 struct SliderEntry {
     /// Squares whose occupancy can change the attacks: each ray without its last square.
     occupancy_mask: Bitboard,
@@ -47,7 +49,10 @@ struct SliderEntry {
     offset: u32,
 }
 
-const _: () = assert!(size_of::<SliderEntry>() == if USE_PEXT { 16 } else { 24 });
+const _: () = assert!(size_of::<SliderEntry>() == if USE_PEXT { 16 } else { 32 });
+// Aligned to their size, and the size divides 64, so entries never cross a cache line.
+const _: () = assert!(align_of::<SliderEntry>() == size_of::<SliderEntry>());
+const _: () = assert!(64 % size_of::<SliderEntry>() == 0, "entries must not cross cache lines");
 
 impl SliderEntry {
     const EMPTY: Self = Self {

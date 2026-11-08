@@ -116,9 +116,9 @@ pub fn parallel_divide(
         return Ok(divide(pos, depth));
     }
 
-    // Expand the first `SPLIT_PLIES` plies on this thread, so workers only read a fixed job
-    // list. Each job keeps the index of its root move, so every root move shares one pool of
-    // workers and no core idles until the whole count is done.
+    // Expand the first `SPLIT_PLIES` plies on this thread, so workers only read a fixed job list.
+    // Each job keeps the index of its root move, so every root move shares one pool of workers and
+    // no core idles until the whole count is done.
     let roots = pos.legal_moves();
     let mut jobs: Vec<(usize, Position)> =
         roots.iter().enumerate().map(|(root, &mv)| (root, child(pos, mv))).collect();
