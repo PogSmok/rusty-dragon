@@ -188,7 +188,7 @@ pub(super) const fn sliding_attacks(
 /// 0b0000 → 0b0010 → 0b1000 → 0b1010 → 0b0000
 ///
 pub(super) const fn next_subset(subset: Bitboard, mask: Bitboard) -> Bitboard {
-    debug_assert!(subset.difference(mask).is_empty(), "subset has bits outside mask");
+    debug_assert!(subset.difference(mask).is_empty(), "subset must lie within mask");
     Bitboard(subset.0.wrapping_sub(mask.0) & mask.0)
 }
 

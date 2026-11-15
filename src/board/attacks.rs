@@ -2,7 +2,8 @@
 //!
 //! Every table is built at compile time by `const` evaluation.
 //!
-//! Sliders share one flat table, indexed with magic numbers by default, or with PEXT when
+//! Sliders share one flat table, indexed with magic numbers by default, or with PEXT (parallel
+//! bits extract, a BMI2 (Bit Manipulation Instruction Set 2) instruction) when
 //! `build.rs` enables `cfg(pext)`. The PEXT backend is faster on CPUs that support it.
 #![expect(long_running_const_eval, reason = "the lookup tables are large by design")]
 
@@ -119,7 +120,7 @@ const fn fill_slider(
             let slot = &mut attacks[offset + index];
             assert!(
                 slot.is_empty() || slot.0 == expected.0,
-                "bad magic number, regenerate magics.rs"
+                "magic numbers must not collide; regenerate magics.rs"
             );
             *slot = expected;
 

@@ -48,7 +48,7 @@ impl Square {
     /// Panics if `i` is not below 64.
     #[inline]
     pub const fn from_index(i: usize) -> Self {
-        assert!(i < 64, "square index out of range");
+        assert!(i < 64, "square index must be below 64");
         #[expect(clippy::cast_possible_truncation, reason = "i < 64")]
         let discriminant = i as u8;
         // SAFETY: `Square` is `repr(u8)` with the discriminants 0..64, and `i < 64`.
@@ -141,7 +141,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "square index out of range")]
+    #[should_panic(expected = "square index must be below 64")]
     fn from_index_out_of_range_panics() {
         let _ = Square::from_index(64);
     }

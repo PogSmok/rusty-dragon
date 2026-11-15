@@ -1,4 +1,4 @@
-//! Material and piece-square tables
+//! Material and PSQT (piece-square tables)
 //!
 //! Source: Chess Programming Wiki, "PeSTO's Evaluation Function"
 //! (<https://chessprogramming.org/PeSTO's_Evaluation_Function>), by Ronald Friederich
@@ -210,7 +210,7 @@ const _: () = {
         largest = if PHASE_WEIGHT[kind] > largest { PHASE_WEIGHT[kind] } else { largest };
         kind += 1;
     }
-    assert!(2 * MAX_PIECES_PER_SIDE * largest as u32 <= u8::MAX as u32, "phase could overflow u8");
+    assert!(2 * MAX_PIECES_PER_SIDE * largest as u32 <= u8::MAX as u32, "phase must fit in a `u8`");
 };
 
 /// How much a piece of `kind` adds to the game phase. `Position` keeps the sum for its pieces.
