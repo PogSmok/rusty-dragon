@@ -26,6 +26,10 @@ impl File {
         Self::A, Self::B, Self::C, Self::D, Self::E, Self::F, Self::G, Self::H
     ];
 
+    /// The file with index `i`, where 0 is the a-file.
+    ///
+    /// # Panics
+    ///
     /// Panics if `i` is not below 8.
     #[inline]
     pub const fn from_index(i: usize) -> Self {

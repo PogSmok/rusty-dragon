@@ -37,6 +37,7 @@ impl Tapered {
     }
 
     /// Panics in debug builds unless both halves of a result fit in `i16`.
+    ///
     /// A half that didn't would have spilled into the other.
     #[inline]
     fn debug_check_halves(mg: i32, eg: i32) {

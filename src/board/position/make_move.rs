@@ -19,6 +19,10 @@ static RIGHTS_LOST: [CastlingRights; 64] = {
 
 impl Position {
     /// Plays `mv`, which must be legal in this position.
+    ///
+    /// # Panics
+    ///
+    /// May panic if `mv` isn't legal here.
     pub fn make_move(&mut self, mv: Move) {
         let us = self.side_to_move;
         let (from, to) = (mv.from(), mv.to());

@@ -24,6 +24,7 @@ pub enum FenError {
     /// Castling field is not "-" or a combination of `KQkq` without repeats.
     Castling(String),
     /// These castling rights lack their king or rook on the standard home square.
+    ///
     /// Chess960 is not supported.
     IllegalCastling(CastlingRights),
     /// En passant field is not "-" or a square.
@@ -82,15 +83,21 @@ impl Error for FenError {
 
 impl Position {
     /// The standard starting position, [`positions::STARTPOS`].
+    #[expect(clippy::missing_panics_doc, reason = "`STARTPOS` is valid FEN")]
     pub fn startpos() -> Self {
         Self::from_fen(positions::STARTPOS).expect("STARTPOS is valid")
     }
 
     /// Parses a FEN string.
+    ///
     /// The halfmove clock and fullmove number may be left out, in which case they default to `0`
     /// and `1`.
     /// EPD operations after the first four fields (`bm`, `id`, ...) are not accepted and must be
     /// stripped by the caller.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`FenError`] if a field is malformed or the FEN describes an illegal position.
     pub fn from_fen(fen: &str) -> Result<Self, FenError> {
         let fields: Vec<&str> = fen.split_whitespace().collect();
         let (placement, side, castling, en_passant, halfmove, fullmove) = match *fields {
@@ -198,6 +205,7 @@ impl Position {
     }
 
     /// Rejects positions where the side to move could capture the opponent's king.
+    ///
     /// Needs `validate_pieces` first, so each side has exactly one king.
     fn validate_opponent_not_in_check(&self) -> Result<(), FenError> {
         let us = self.side_to_move;
@@ -227,6 +235,7 @@ impl Position {
     }
 
     /// Checks that `square` is one the opponent's pawn just skipped with a double push.
+    ///
     /// Returns it only if the side to move has a legal en passant capture there, as `make_move`
     /// would record it, so equal positions compare equal however they were set up.
     /// Needs `validate_pieces` first, so each side has exactly one king.

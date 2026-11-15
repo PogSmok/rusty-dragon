@@ -100,7 +100,14 @@ const SPLIT_PLIES: u32 = 2;
 const STOP_CHECK_DEPTH: u32 = 3;
 
 /// Same as [`divide`], with the subtrees `SPLIT_PLIES` below the root spread over all cores.
+///
 /// Gives up once `stop` is set, though a count small enough may finish first.
+///
+/// # Errors
+///
+/// Returns [`PerftError::TooDeep`] if `depth` is above [`MAX_DEPTH`],
+/// and [`PerftError::Stopped`] if `stop` ended the count.
+#[expect(clippy::missing_panics_doc, reason = "perft workers don't panic")]
 pub fn parallel_divide(
     pos: &Position,
     depth: u32,

@@ -20,6 +20,7 @@ const PROMOTIONS: [PieceKind; 4] =
 impl Position {
     /// Every legal move for the side to move: all captures and promotions first (en passant
     /// included), then all quiet moves (castling included).
+    ///
     /// No order is guaranteed within each group.
     pub fn legal_moves(&self) -> MoveList {
         // One pass over the pieces, with quiet moves held back and appended after the captures.
@@ -31,6 +32,7 @@ impl Position {
     }
 
     /// Finds the legal move written in UCI notation, e.g. `e2e4`, `e1g1` or `e7e8q`.
+    ///
     /// Generates every legal move to do it, so it's meant for input, not for search.
     /// To look up several moves in one position, generate once and use [`MoveList::find_uci`].
     #[must_use]
@@ -103,6 +105,7 @@ struct KingDanger {
 
 impl KingDanger {
     /// Whether our king would be attacked on `to`.
+    ///
     /// Leapers first: one bit test that often settles it before any slider lookup.
     #[inline]
     fn attacks(&self, to: Square) -> bool {
@@ -261,6 +264,7 @@ impl<'a> MoveGen<'a> {
     }
 
     /// Pushes, captures and promotions of all `pawns` at once, landing only on `target`.
+    ///
     /// Doesn't include en passant.
     fn pawn_moves(
         &self,
@@ -301,6 +305,7 @@ impl<'a> MoveGen<'a> {
 
     /// Only called when not in check, so `danger` seeing through our king doesn't matter: a
     /// slider attacking past it would be giving check.
+    ///
     /// `king_targets` already says whether the square the king passes over (next to it) is safe;
     /// only the landing square needs checking.
     fn castling(&self, moves: &mut MoveList, king_targets: Bitboard, danger: &KingDanger) {

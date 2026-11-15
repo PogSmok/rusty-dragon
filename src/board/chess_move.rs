@@ -34,7 +34,11 @@ impl MoveKind {
     const CAPTURE_BIT: u16 = 0b0100;
     const PROMOTION_BIT: u16 = 0b1000;
 
-    /// Promotion to `piece`, which must be a knight, bishop, rook or queen.
+    /// Promotion to `piece`, capturing if `capture`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `piece` is a pawn or a king.
     #[inline]
     pub const fn promotion(piece: PieceKind, capture: bool) -> Self {
         match (piece, capture) {
@@ -52,6 +56,7 @@ impl MoveKind {
 }
 
 /// A move packed into 16 bits:
+///
 /// - source square in bits 0-5,
 /// - destination square in bits 6-11,
 /// - [`MoveKind`] flag in bits 12-15.

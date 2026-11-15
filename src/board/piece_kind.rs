@@ -28,6 +28,10 @@ impl PieceKind {
     pub const ALL: [Self; 6] =
         [Self::Pawn, Self::Knight, Self::Bishop, Self::Rook, Self::Queen, Self::King];
 
+    /// The piece kind with index `i`, in [`Self::ALL`] order.
+    ///
+    /// # Panics
+    ///
     /// Panics if `i` is not below 6.
     #[inline]
     pub const fn from_index(i: usize) -> Self {
