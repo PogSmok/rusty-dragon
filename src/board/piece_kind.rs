@@ -31,7 +31,7 @@ impl PieceKind {
     /// Panics if `i` is not below 6.
     #[inline]
     pub const fn from_index(i: usize) -> Self {
-        assert!(i < 6, "piece kind index out of range");
+        assert!(i < 6, "piece kind index must be below 6");
         #[expect(clippy::cast_possible_truncation, reason = "i < 6")]
         let discriminant = i as u8;
         // SAFETY: `PieceKind` is `repr(u8)` with the discriminants 0..6, and `i < 6`.
@@ -79,7 +79,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "piece kind index out of range")]
+    #[should_panic(expected = "piece kind index must be below 6")]
     fn from_index_out_of_range_panics() {
         let _ = PieceKind::from_index(6);
     }

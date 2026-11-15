@@ -1,7 +1,7 @@
 use std::fmt;
 use std::ops::{Add, AddAssign, Neg, Sub, SubAssign};
 
-/// A middlegame and an endgame value packed into one `i32`, so one add updates both.
+/// An `mg` (middlegame) and an `eg` (endgame) value packed into one `i32`
 ///
 /// The endgame value sits in the high 16 bits and the middlegame value in the low 16.
 /// Each half must stay within `i16`, or it spills into the other; debug builds check it.
@@ -18,7 +18,7 @@ impl Tapered {
         Self(((eg as i32) << 16).wrapping_add(mg as i32))
     }
 
-    /// The middlegame value.
+    /// The mg (middlegame) value.
     #[inline]
     #[must_use]
     pub const fn mg(self) -> i16 {
@@ -27,7 +27,7 @@ impl Tapered {
         mg
     }
 
-    /// The endgame value.
+    /// The eg (endgame) value.
     #[inline]
     #[must_use]
     pub const fn eg(self) -> i16 {
@@ -42,7 +42,7 @@ impl Tapered {
     fn debug_check_halves(mg: i32, eg: i32) {
         debug_assert!(
             i16::try_from(mg).is_ok() && i16::try_from(eg).is_ok(),
-            "a half of a Tapered result is outside i16: mg {mg}, eg {eg}"
+            "both halves of a `Tapered` result must fit in `i16`: mg {mg}, eg {eg}"
         );
     }
 }
@@ -145,7 +145,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(debug_assertions, should_panic(expected = "outside i16"))]
+    #[cfg_attr(debug_assertions, should_panic(expected = "must fit in `i16`"))]
     fn debug_builds_catch_a_half_spilling_over() {
         // Release builds wrap without checking, so the test only expects a panic in debug.
         let near_max = Tapered::new(i16::MAX, 0);

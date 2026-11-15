@@ -29,7 +29,7 @@ impl File {
     /// Panics if `i` is not below 8.
     #[inline]
     pub const fn from_index(i: usize) -> Self {
-        assert!(i < 8, "file index out of range");
+        assert!(i < 8, "file index must be below 8");
         #[expect(clippy::cast_possible_truncation, reason = "i < 8")]
         let discriminant = i as u8;
         // SAFETY: `File` is `repr(u8)` with the discriminants 0..8, and `i < 8`.
@@ -77,7 +77,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "file index out of range")]
+    #[should_panic(expected = "file index must be below 8")]
     fn from_index_out_of_range_panics() {
         let _ = File::from_index(8);
     }

@@ -1,4 +1,4 @@
-//! Fixed-seed PRNG for tests
+//! Fixed-seed PRNG (pseudo-random number generator) for tests
 
 #[derive(Debug)]
 pub(super) struct Xorshift64(u64);

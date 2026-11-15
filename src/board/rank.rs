@@ -33,7 +33,7 @@ impl Rank {
     /// Panics if `i` is not below 8.
     #[inline]
     pub const fn from_index(i: usize) -> Self {
-        assert!(i < 8, "rank index out of range");
+        assert!(i < 8, "rank index must be below 8");
         #[expect(clippy::cast_possible_truncation, reason = "i < 8")]
         let discriminant = i as u8;
         // SAFETY: `Rank` is `repr(u8)` with the discriminants 0..8, and `i < 8`.
@@ -81,7 +81,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "rank index out of range")]
+    #[should_panic(expected = "rank index must be below 8")]
     fn from_index_out_of_range_panics() {
         let _ = Rank::from_index(8);
     }

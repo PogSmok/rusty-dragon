@@ -80,6 +80,7 @@ impl Bitboard {
 
     #[inline]
     #[must_use]
+    /// Popcount (population count): the number of squares in the set.
     pub const fn popcount(self) -> u32 {
         self.0.count_ones()
     }
@@ -123,7 +124,7 @@ impl Bitboard {
         Self(self.0 & !Self::from_square(square).0)
     }
 
-    /// Lowest set square or `None` if self is empty
+    /// LSB (least significant bit): the lowest set square, or `None` if `self` is empty
     #[inline]
     #[must_use]
     pub const fn lsb(self) -> Option<Square> {
@@ -134,7 +135,7 @@ impl Bitboard {
         }
     }
 
-    /// Removes and returns the lowest set square
+    /// Removes and returns the LSB, the lowest set square
     #[inline]
     pub const fn pop_lsb(&mut self) -> Option<Square> {
         match self.lsb() {
@@ -146,7 +147,7 @@ impl Bitboard {
         }
     }
 
-    /// Removes the lowest set square
+    /// Removes the LSB, the lowest set square
     #[inline]
     pub const fn clear_lsb(&mut self) {
         self.0 &= self.0.wrapping_sub(1);
