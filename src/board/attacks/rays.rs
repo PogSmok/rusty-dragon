@@ -136,6 +136,7 @@ const fn ray_end(ray: Bitboard, direction: Direction) -> Square {
 }
 
 /// Squares whose occupancy can change a slider's attacks from `square`.
+///
 /// A piece on the end of a ray blocks nothing behind it, so ray ends are excluded.
 pub(super) const fn relevant_mask(square: Square, directions: [Direction; 4]) -> Bitboard {
     let mut mask = Bitboard::EMPTY;
@@ -179,6 +180,7 @@ pub(super) const fn sliding_attacks(
 }
 
 /// The subset of `mask` after `subset`, in increasing numeric order.
+///
 /// Starting from empty, it visits every subset and wraps back to empty after `mask` itself.
 ///
 /// Increasing order allows direct PEXT mapping, nth subset of `mask` is the nth PEXT of `mask`.
@@ -186,20 +188,21 @@ pub(super) const fn sliding_attacks(
 /// e.g. for mask = 0b1010, the subsets are visited in this order:
 ///
 /// 0b0000 → 0b0010 → 0b1000 → 0b1010 → 0b0000
-///
 pub(super) const fn next_subset(subset: Bitboard, mask: Bitboard) -> Bitboard {
     debug_assert!(subset.difference(mask).is_empty(), "subset must lie within mask");
     Bitboard(subset.0.wrapping_sub(mask.0) & mask.0)
 }
 
-/// Pairwise square tables: `table[square_a_idx][square_b_idx]`
-/// Non-empty `Bitboard` for every pair of squares sharing a rank, file or diagonal
+/// Pairwise square tables: `table[square_a_idx][square_b_idx]`.
+///
+/// Non-empty `Bitboard` for every pair of squares sharing a rank, file or diagonal.
 /// Empty `Bitboard` for every other pair (including `square_a_idx == square_b_idx`).
 pub(super) type PairTable = [[Bitboard; 64]; 64];
 
 /// `table[square_a_idx][square_b_idx]`: squares strictly between `square_a_idx` and `square_b_idx`.
+///
 /// Empty `Bitboard` if the squares don't share a rank, file or diagonal (or are adjacent).
-#[expect(clippy::large_stack_arrays, reason = "only evaluated at compile. time")]
+#[expect(clippy::large_stack_arrays, reason = "only evaluated at compile time")]
 pub(super) const fn between_table() -> PairTable {
     let mut table = [[Bitboard::EMPTY; 64]; 64];
     let mut square_a_idx = 0;
@@ -219,8 +222,9 @@ pub(super) const fn between_table() -> PairTable {
     table
 }
 
-/// `table[square_a_idx][square_b_idx]`: entire rank, file or diagonal that contains both squares
-/// Empty `Bitboard` if the squares are not aligned
+/// `table[square_a_idx][square_b_idx]`: entire rank, file or diagonal that contains both squares.
+///
+/// Empty `Bitboard` if the squares are not aligned.
 #[expect(clippy::large_stack_arrays, reason = "only evaluated at compile time")]
 pub(super) const fn line_table() -> PairTable {
     let mut table = [[Bitboard::EMPTY; 64]; 64];

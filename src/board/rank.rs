@@ -30,6 +30,10 @@ impl Rank {
     pub const ALL: [Self; 8] =
         [Self::R1, Self::R2, Self::R3, Self::R4, Self::R5, Self::R6, Self::R7, Self::R8];
 
+    /// The rank with index `i`, where 0 is the first rank.
+    ///
+    /// # Panics
+    ///
     /// Panics if `i` is not below 8.
     #[inline]
     pub const fn from_index(i: usize) -> Self {

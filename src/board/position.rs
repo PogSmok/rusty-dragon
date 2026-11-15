@@ -13,6 +13,7 @@ mod movegen;
 pub use fen::FenError;
 
 /// Each side starts with 16 pieces, and none can be added.
+///
 /// The piece-square total's `i16` halves rely on it, so FEN parsing rejects more and the board
 /// writes check it in debug builds.
 pub(crate) const MAX_PIECES_PER_SIDE: u32 = 16;
@@ -23,12 +24,14 @@ pub(crate) const MAX_PIECES_PER_SIDE: u32 = 16;
 #[must_use]
 pub struct Position {
     /// Zobrist key of the pieces, side to move, castling rights and en passant square.
+    ///
     /// Kept in sync by the board and state writes, the only code that changes what it covers.
     /// First, so the derived `PartialEq` rejects unequal positions on one comparison.
     zobrist_key: u64,
     /// Squares occupied by each piece kind (both colors), indexed by `PieceKind`.
     by_kind: [Bitboard; 6],
     /// Squares occupied by each color, indexed by `Color`.
+    ///
     /// Right after `by_kind`, since `pieces(color, kind)` reads both.
     by_color: [Bitboard; 2],
     /// Material and piece-square total from White's view. Kept in sync by the board writes.
@@ -38,6 +41,7 @@ pub struct Position {
     /// Square a pawn skipped over on the previous double push, if any.
     en_passant: Option<Square>,
     /// Game phase of the pieces on the board, uncapped: see [`eval::phase_weight`].
+    ///
     /// Kept in sync by the board writes. It fills what would otherwise be a padding byte.
     phase: u8,
     /// Plies since the last capture or pawn move (fifty-move rule).
@@ -49,8 +53,9 @@ pub struct Position {
 }
 
 impl Position {
-    /// No pieces, White to move, no castling rights, move 1. Its Zobrist key and
-    /// piece-square total are 0.
+    /// No pieces, White to move, no castling rights, move 1.
+    ///
+    /// Its Zobrist key and piece-square total are 0.
     const EMPTY: Self = Self {
         zobrist_key: 0,
         by_kind: [Bitboard::EMPTY; 6],
@@ -146,6 +151,7 @@ impl Position {
 
     /// The Zobrist key, piece-square total and phase computed from scratch, which the kept
     /// ones must always equal, in one pass over the pieces.
+    ///
     /// Read from the bitboards, while the board writes update them from what they put in the
     /// mailbox, so a check against them also compares the two.
     fn compute_incremental(&self) -> Incremental {
@@ -238,6 +244,7 @@ impl Position {
 
     /// Square of `color`'s king. Every position has exactly one king per side.
     #[inline]
+    #[expect(clippy::missing_panics_doc, reason = "every position has a king per side")]
     pub fn king_square(&self, color: Color) -> Square {
         self.pieces(color, PieceKind::King).lsb().expect("each side has a king")
     }
@@ -306,6 +313,7 @@ impl Position {
 
     /// Equal for positions with the same pieces, side to move, castling rights and
     /// en passant square, whatever the move counters.
+    ///
     /// Distinct positions almost always get distinct Zobrist keys, but a collision is possible.
     ///
     /// Due to collissions a move found by Zobrist key, such as a transposition table's best move,
@@ -319,6 +327,7 @@ impl Position {
     }
 
     /// Material and piece-square total from White's view, kept up to date as pieces move.
+    ///
     /// See [`eval`].
     #[inline]
     pub const fn psqt(&self) -> Tapered {

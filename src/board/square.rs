@@ -45,6 +45,10 @@ impl Square {
         Self::A8, Self::B8, Self::C8, Self::D8, Self::E8, Self::F8, Self::G8, Self::H8,
     ];
 
+    /// The square with index `i`, where 0 is a1, 1 is b1 and 63 is h8.
+    ///
+    /// # Panics
+    ///
     /// Panics if `i` is not below 64.
     #[inline]
     pub const fn from_index(i: usize) -> Self {

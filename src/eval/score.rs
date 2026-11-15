@@ -23,6 +23,7 @@ impl Score {
 
     /// Where mate scores count down from: mating in `n` plies is `MATE - n`,
     /// and being checkmated now is `-MATE`.
+    ///
     /// No position scores `MATE` itself, since a mate takes a move.
     pub const MATE: Self = Self(32_000);
 

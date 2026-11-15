@@ -32,6 +32,7 @@ fn score(pos: &Position, phase: i32, insufficient_material: bool) -> Score {
 }
 
 /// Game phase from 0, bare kings and pawns, to [`MAX_PHASE`], the starting material.
+///
 /// `Position` keeps the uncapped sum as pieces come and go, so this is one read.
 fn phase(pos: &Position) -> i32 {
     i32::from(pos.phase()).min(MAX_PHASE)

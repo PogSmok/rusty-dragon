@@ -16,6 +16,7 @@ pub enum Command<'a> {
     /// `debug on` or `debug off`.
     Debug(bool),
     /// `isready`: answered with `readyok` once every earlier command has been read.
+    ///
     /// Work running in the background, like a search or `go perft`, keeps running.
     IsReady,
     /// `setoption name <id> [value <x>]`. Both the name and the value may contain spaces.
@@ -142,8 +143,14 @@ impl Error for ParseError<'_> {}
 
 impl<'a> Command<'a> {
     /// Parses one line of input.
+    ///
     /// Unknown tokens before the command are skipped, and unknown arguments are ignored.
-    /// e.g "hello world\nuci" parses as `Command::Uci`.
+    /// For example, `"hello world uci"` parses as [`Command::Uci`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ParseError`] if the line has no known command,
+    /// or the command's arguments are malformed.
     pub fn parse(line: &'a str) -> Result<Self, ParseError<'a>> {
         let mut rest = line;
         while let Some((token, args)) = split_token(rest) {
@@ -250,6 +257,7 @@ fn millis(tokens: &mut Tokens<'_>) -> Option<Duration> {
 }
 
 /// Splits off the first whitespace-delimited token.
+///
 /// The rest keeps its leading whitespace. `None` if `s` is blank.
 fn split_token(s: &str) -> Option<(&str, &str)> {
     let s = s.trim_start();
@@ -293,6 +301,7 @@ mod tests {
     }
 
     /// A line for each kind of command.
+    ///
     /// A new command doesn't compile until it has a line here.
     /// Add that line to [`EXAMPLES`] too: nothing can check that it's there.
     fn example(command: &Command<'_>) -> &'static str {

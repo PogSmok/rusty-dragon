@@ -220,6 +220,7 @@ pub(crate) fn phase_weight(kind: PieceKind) -> u8 {
 }
 
 /// The phase of the starting material, both sides' minor pieces, rooks and queens.
+///
 /// Higher means more middlegame.
 /// Early promotions can push a count past it, so it's also a cap.
 pub const MAX_PHASE: i32 = 24;

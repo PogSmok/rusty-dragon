@@ -26,6 +26,9 @@ impl MoveList {
     }
 
     /// Appends `mv`.
+    ///
+    /// # Panics
+    ///
     /// Panics if the list is full, which no legal position can cause.
     #[inline]
     pub fn push(&mut self, mv: Move) {
@@ -34,6 +37,9 @@ impl MoveList {
     }
 
     /// Appends every move in `other`, in order.
+    ///
+    /// # Panics
+    ///
     /// Panics if they don't fit, which no legal position can cause.
     #[inline]
     pub fn append(&mut self, other: &Self) {
@@ -45,7 +51,7 @@ impl MoveList {
     #[inline]
     #[must_use]
     pub fn as_slice(&self) -> &[Move] {
-        // SAFETY: the first `len` slots are initialized
+        // SAFETY: the first `len` slots are initialized.
         unsafe { slice::from_raw_parts(self.moves.as_ptr().cast::<Move>(), self.len) }
     }
 

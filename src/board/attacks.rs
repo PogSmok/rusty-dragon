@@ -95,6 +95,7 @@ impl SliderTables {
 }
 
 /// Fills `attacks` table for all squares and occupancy masks for given slider type.
+///
 /// Returns offset for the next slider type.
 const fn fill_slider(
     entries: &mut [SliderEntry; 64],
@@ -291,8 +292,10 @@ pub fn between(a: Square, b: Square) -> Bitboard {
     BETWEEN[a.index()][b.index()]
 }
 
-/// The whole rank, file or diagonal through `a` and `b`, edge to edge, if they share one,
-/// otherwise empty. Also empty when `a == b`.
+/// The whole rank, file or diagonal through `a` and `b`, edge to edge,
+/// if they share one, otherwise empty.
+///
+/// Also empty when `a == b`.
 #[inline]
 pub fn line(a: Square, b: Square) -> Bitboard {
     LINE[a.index()][b.index()]
@@ -354,8 +357,10 @@ mod tests {
         assert_eq!(bishop(A1), Bitboard::from_iter([B2, C3, D4, E5, F6, G7]));
     }
 
-    /// CI sets `RUSTY_DRAGON_EXPECTED_SLIDER_BACKEND` so a misconfigured matrix row can't
-    /// silently test the wrong slider backend. No-op on local builds.
+    /// CI sets `RUSTY_DRAGON_EXPECTED_SLIDER_BACKEND` so a misconfigured matrix row
+    /// can't silently test the wrong slider backend.
+    ///
+    /// No-op on local builds.
     #[test]
     fn slider_backend_matches_ci_expectation() {
         let active = if cfg!(pext) { "pext" } else { "magic" };

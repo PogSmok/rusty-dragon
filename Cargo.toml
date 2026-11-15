@@ -26,8 +26,9 @@ rust_2018_idioms = { level = "warn", priority = -1 }
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 
-missing_panics_doc = "allow"
-missing_errors_doc = "allow"
+missing_panics_doc = "warn"
+missing_errors_doc = "warn"
+too_long_first_doc_paragraph = "warn"
 
 # Every `unsafe` block needs a `// SAFETY:` comment.
 undocumented_unsafe_blocks = "deny"
@@ -43,6 +44,10 @@ expect_used = "allow"
 
 allow_attributes = "warn"
 allow_attributes_without_reason = "warn"
+
+[lints.rustdoc]
+missing_crate_level_docs = "warn"
+unescaped_backticks = "warn"
 
 [profile.dev]
 opt-level = 1

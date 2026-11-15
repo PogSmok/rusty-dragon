@@ -1,4 +1,5 @@
-//! Universal Chess Interface
+//! UCI (Universal Chess Interface): talking to a chess GUI over standard input and output.
+//!
 //! Specification: <https://www.wbec-ridderkerk.nl/html/UCIProtocol.html>
 
 use std::fmt;
@@ -21,8 +22,14 @@ const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
 
 /// Reads commands from the input `open_input` returns until `quit` or the end of input, writing
 /// replies to `output`.
-/// Fails only if reading or writing fails; bad commands are reported to the GUI and skipped.
+///
+/// Bad commands are reported to the GUI and skipped.
 /// `quit` stops a running `go perft`; the end of input lets it finish.
+///
+/// # Errors
+///
+/// Returns an error only if reading or writing fails.
+#[expect(clippy::missing_panics_doc, reason = "the session keeps a sender alive")]
 pub fn run<R: BufRead>(
     open_input: impl FnOnce() -> R + Send + 'static,
     output: impl Write,
@@ -77,6 +84,7 @@ enum Event {
     /// A line of input, not yet decoded.
     Line(Vec<u8>),
     /// Input that couldn't be read, such as text a Windows console can't convert to UTF-8.
+    ///
     /// Reading carries on after it.
     BadInput(io::Error),
     /// The input ended, or reading it failed for good.
@@ -329,6 +337,7 @@ impl<W: Write> Session<W> {
     }
 
     /// Counts on its own thread, so `isready` and `stop` are still answered.
+    ///
     /// The result is printed once it's done.
     fn start_perft(&mut self, depth: u32) -> io::Result<()> {
         self.end_perft(true)?;
@@ -349,6 +358,7 @@ impl<W: Write> Session<W> {
     }
 
     /// Reports perft `id` if it's the one running.
+    ///
     /// The thread sends `PerftDone` as it exits, so joining it doesn't wait.
     fn finish_perft(&mut self, id: u64) -> io::Result<()> {
         match self.perft.take_if(|perft| perft.id == id) {
