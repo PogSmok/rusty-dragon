@@ -5,15 +5,16 @@ use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 use rusty_dragon::board::Position;
-use rusty_dragon::{perft, uci};
+use rusty_dragon::{bench, perft, search, uci};
 
-const USAGE: &str = "usage: rusty-dragon [perft <depth> [fen]]";
+const USAGE: &str = "usage: rusty-dragon [perft <depth> [fen] | bench [depth]]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     match args.split_first() {
         None => run_uci(),
         Some((command, rest)) if command == "perft" => run_perft(rest),
+        Some((command, rest)) if command == "bench" => run_bench(rest),
         Some(_) => fail(USAGE),
     }
 }
@@ -50,6 +51,30 @@ fn run_perft(args: &[String]) -> ExitCode {
     #[expect(clippy::cast_precision_loss, reason = "only for display")]
     let nps = split.nodes() as f64 / elapsed.as_secs_f64().max(f64::EPSILON);
     println!("{split}\nTime: {:.3} s\nNPS: {nps:.0}", elapsed.as_secs_f64());
+    ExitCode::SUCCESS
+}
+
+/// `bench [depth]`: prints the node count and best move of each bench position, then the totals.
+fn run_bench(args: &[String]) -> ExitCode {
+    let depth = match args {
+        [] => bench::DEFAULT_DEPTH,
+        [depth] => match depth.parse::<u32>() {
+            Ok(depth) if (1..=search::MAX_DEPTH).contains(&depth) => depth,
+            _ => return fail(USAGE),
+        },
+        _ => return fail(USAGE),
+    };
+
+    let count = bench::POSITIONS.len();
+    let summary = bench::run(depth, |index, outcome| {
+        let best = outcome.best.map_or_else(|| "0000".into(), |mv| mv.to_string());
+        println!("Position {:>2}/{count}: {} nodes, best move {best}", index + 1, outcome.nodes);
+    });
+    let summary = match summary {
+        Ok(summary) => summary,
+        Err(e) => return fail(&format!("could not start the bench: {e}")),
+    };
+    println!("\nTime: {:.3} s\n{summary}", summary.time.as_secs_f64());
     ExitCode::SUCCESS
 }
 
