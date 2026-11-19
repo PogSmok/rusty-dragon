@@ -1,7 +1,7 @@
 //! Applying a move to a position.
 
 use super::Position;
-use crate::board::{Castle, CastlingRights, Color, Move, Piece, PieceKind};
+use crate::board::{Castle, CastlingRights, Color, Move, Piece, PieceKind, zobrist};
 
 /// `RIGHTS_LOST[square]`: castling rights lost when a piece moves from or to `square`
 static RIGHTS_LOST: [CastlingRights; 64] = {
@@ -22,12 +22,12 @@ impl Position {
     ///
     /// # Panics
     ///
-    /// May panic if `mv` isn't legal here.
+    /// May panic if `mv` is not legal here.
     pub fn make_move(&mut self, mv: Move) {
         let us = self.side_to_move;
         let (from, to) = (mv.from(), mv.to());
-        let piece = self.piece_at(from).expect("no piece on source square");
-        debug_assert_eq!(piece.color(), us, "{mv} moves the opponent's piece");
+        let piece = self.piece_at(from).expect("the source square should hold a piece");
+        debug_assert_eq!(piece.color(), us, "{mv} must move a piece of the side to move");
 
         self.set_en_passant(None);
         self.halfmove_clock = if piece.kind() == PieceKind::Pawn || mv.is_capture() {
@@ -37,11 +37,10 @@ impl Position {
         };
 
         if mv.is_en_passant() {
-            // The captured pawn is just behind the destination, from the mover's side.
-            self.remove_piece(to.wrapping_offset(-us.pawn_push()));
+            self.remove_piece(mv.en_passant_victim());
         } else if mv.is_capture() {
             let captured = self.remove_piece(to);
-            debug_assert!(captured.is_some(), "{mv} captures on an empty square");
+            debug_assert!(captured.is_some(), "{mv} must capture a piece");
         }
 
         if let Some(promotion) = mv.promotion() {
@@ -52,8 +51,7 @@ impl Position {
         }
 
         if mv.is_castle() {
-            let [kingside, queenside] = Castle::of(us);
-            let castle = if to == kingside.king_to { kingside } else { queenside };
+            let castle = Castle::landing_on(us, to);
             self.move_piece(castle.rook_from, castle.rook_to);
         }
 
@@ -76,8 +74,68 @@ impl Position {
 
         debug_assert!(
             !self.is_attacked(self.king_square(us), self.side_to_move),
-            "{mv} left the king in check"
+            "{mv} must not leave the king in check"
         );
+        self.debug_check_incremental();
+    }
+
+    /// The Zobrist key after `mv`, legal here, without making it.
+    ///
+    /// After a double push that allows en passant, the key leaves out the en passant square, so
+    /// it differs from the key [`Position::make_move`] gives.
+    ///
+    /// # Panics
+    ///
+    /// May panic if `mv` is not legal here.
+    #[must_use]
+    #[inline]
+    pub fn key_after(&self, mv: Move) -> u64 {
+        let (from, to) = (mv.from(), mv.to());
+        let piece = self.piece_at(from).expect("the source square should hold a piece");
+        let landed = mv.promotion().map_or(piece, |kind| Piece::new(self.side_to_move, kind));
+        let captured = self.piece_at(to).map_or(0, |captured| zobrist::piece(captured, to));
+        let rights = self.castling_rights;
+        let kept = rights.without(RIGHTS_LOST[from.index()].with(RIGHTS_LOST[to.index()]));
+        let us = self.side_to_move;
+        let second = if mv.is_castle() {
+            let castle = Castle::landing_on(us, to);
+            let rook = Piece::new(us, PieceKind::Rook);
+            zobrist::piece(rook, castle.rook_from) ^ zobrist::piece(rook, castle.rook_to)
+        } else if mv.is_en_passant() {
+            let pawn = Piece::new(us.opposite(), PieceKind::Pawn);
+            zobrist::piece(pawn, mv.en_passant_victim())
+        } else {
+            0
+        };
+        self.zobrist_key
+            ^ second
+            ^ zobrist::black_to_move()
+            ^ zobrist::en_passant(self.en_passant)
+            ^ zobrist::castling(rights)
+            ^ zobrist::castling(kept)
+            ^ zobrist::piece(piece, from)
+            ^ zobrist::piece(landed, to)
+            ^ captured
+    }
+
+    /// The Zobrist key after [`Position::make_null_move`], without making it.
+    #[must_use]
+    #[inline]
+    pub fn key_after_null_move(&self) -> u64 {
+        self.zobrist_key ^ zobrist::black_to_move() ^ zobrist::en_passant(self.en_passant)
+    }
+
+    /// Passes the turn without moving.
+    ///
+    /// Not legal in chess, and not allowed in check, since the opponent could then take the king.
+    pub fn make_null_move(&mut self) {
+        debug_assert!(!self.in_check(), "null move must not be made in check");
+        self.set_en_passant(None);
+        self.halfmove_clock = self.halfmove_clock.saturating_add(1);
+        if self.side_to_move == Color::Black {
+            self.fullmove_number = self.fullmove_number.saturating_add(1);
+        }
+        self.flip_side_to_move();
         self.debug_check_incremental();
     }
 }
@@ -89,7 +147,7 @@ mod tests {
 
     /// Plays UCI `moves` from `fen` and returns the resulting FEN.
     fn play(fen: &str, moves: &[&str]) -> String {
-        let mut pos = Position::from_fen(fen).expect("valid FEN");
+        let mut pos = Position::from_fen(fen).expect("FEN should be valid");
         for uci in moves {
             let mv = pos.parse_uci_move(uci).unwrap_or_else(|| panic!("{uci} is not legal"));
             pos.make_move(mv);
@@ -142,7 +200,7 @@ mod tests {
         assert_eq!(play(fen, &["e1c1", "e8g8"]), "r4rk1/8/8/8/8/8/8/2KR3R w - - 2 2");
         assert_eq!(play(fen, &["e1g1", "e8c8"]), "2kr3r/8/8/8/8/8/8/R4RK1 w - - 2 2");
         // White's rook on d1 attacks d8, which Black's king would pass through.
-        let pos = Position::from_fen(&play(fen, &["e1c1"])).expect("valid FEN");
+        let pos = Position::from_fen(&play(fen, &["e1c1"])).expect("FEN should be valid");
         assert_eq!(pos.parse_uci_move("e8c8"), None);
     }
 
@@ -166,7 +224,7 @@ mod tests {
     /// computed from scratch and the one of the same position read back from its FEN.
     fn check_zobrist_keys(pos: &Position, depth: u32) {
         pos.assert_consistent();
-        let from_fen = Position::from_fen(&pos.to_fen()).expect("valid FEN");
+        let from_fen = Position::from_fen(&pos.to_fen()).expect("FEN should be valid");
         assert_eq!(pos.zobrist_key(), from_fen.zobrist_key(), "{}", pos.to_fen());
         if depth > 0 {
             for &mv in &pos.legal_moves() {
@@ -180,7 +238,7 @@ mod tests {
     #[test]
     fn zobrist_key_stays_in_sync_through_every_kind_of_move() {
         for fen in [STARTPOS, KIWIPETE, POSITION_3, POSITION_4] {
-            check_zobrist_keys(&Position::from_fen(fen).expect("valid FEN"), 3);
+            check_zobrist_keys(&Position::from_fen(fen).expect("FEN should be valid"), 3);
         }
     }
 
@@ -190,7 +248,7 @@ mod tests {
         let zobrist_key = |moves: &[&str]| {
             let mut pos = Position::startpos();
             for uci in moves {
-                pos.make_move(pos.parse_uci_move(uci).expect("legal"));
+                pos.make_move(pos.parse_uci_move(uci).expect("move should be legal"));
             }
             pos.zobrist_key()
         };
@@ -207,7 +265,7 @@ mod tests {
 
     #[test]
     fn zobrist_key_tells_apart_side_castling_and_en_passant() {
-        let zobrist_key = |fen| Position::from_fen(fen).expect("valid FEN").zobrist_key();
+        let zobrist_key = |fen| Position::from_fen(fen).expect("FEN should be valid").zobrist_key();
         // The pawn on e5 can take en passant on either d6 or f6.
         let board = "r3k2r/8/8/3pPp2/8/8/8/R3K2R";
         let zobrist_keys = [
@@ -221,6 +279,50 @@ mod tests {
             for b in &zobrist_keys[i + 1..] {
                 assert_ne!(a, b);
             }
+        }
+    }
+
+    #[test]
+    fn null_move_passes_the_turn_and_clears_en_passant() {
+        let mut pos =
+            Position::from_fen("rnbqkbnr/ppp1pppp/8/8/3pP3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 3")
+                .expect("FEN should be valid");
+        pos.make_null_move();
+        pos.assert_consistent();
+        assert_eq!(pos.to_fen(), "rnbqkbnr/ppp1pppp/8/8/3pP3/8/PPPP1PPP/RNBQKBNR w KQkq - 1 4");
+        pos.make_null_move();
+        let fen = "rnbqkbnr/ppp1pppp/8/8/3pP3/8/PPPP1PPP/RNBQKBNR b KQkq - 2 4";
+        assert_eq!(
+            pos.zobrist_key(),
+            Position::from_fen(fen).expect("FEN should be valid").zobrist_key()
+        );
+    }
+
+    /// Checks at every node `depth` plies below `pos` that `key_after` matches the key
+    /// `make_move` keeps, except after moves that allow en passant, where it is only a guess.
+    fn check_key_after(pos: &Position, depth: u32) {
+        let mut null = pos.clone();
+        if !pos.in_check() {
+            null.make_null_move();
+            assert_eq!(pos.key_after_null_move(), null.zobrist_key());
+        }
+        for &mv in &pos.legal_moves() {
+            let mut child = pos.clone();
+            child.make_move(mv);
+            let guess = child.en_passant().is_some();
+            if !guess {
+                assert_eq!(pos.key_after(mv), child.zobrist_key(), "{mv} in {}", pos.to_fen());
+            }
+            if depth > 0 {
+                check_key_after(&child, depth - 1);
+            }
+        }
+    }
+
+    #[test]
+    fn key_after_predicts_the_child_key() {
+        for fen in [STARTPOS, KIWIPETE, POSITION_3, POSITION_4] {
+            check_key_after(&Position::from_fen(fen).expect("FEN should be valid"), 2);
         }
     }
 

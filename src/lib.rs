@@ -4,6 +4,7 @@ pub mod board;
 pub mod eval;
 pub mod perft;
 pub mod positions;
+pub mod search;
 pub mod uci;
 
 pub const ENGINE_NAME: &str = "Rusty Dragon";

@@ -1,3 +1,5 @@
+//! FEN (Forsyth-Edwards Notation): the standard one-line text form of a position.
+
 use std::error::Error;
 use std::fmt;
 use std::str::FromStr;
@@ -85,7 +87,7 @@ impl Position {
     /// The standard starting position, [`positions::STARTPOS`].
     #[expect(clippy::missing_panics_doc, reason = "`STARTPOS` is valid FEN")]
     pub fn startpos() -> Self {
-        Self::from_fen(positions::STARTPOS).expect("STARTPOS is valid")
+        Self::from_fen(positions::STARTPOS).expect("`STARTPOS` should be valid FEN")
     }
 
     /// Parses a FEN string.
@@ -370,27 +372,29 @@ mod tests {
     #[test]
     fn en_passant_square_is_kept_only_if_the_capture_is_legal() {
         // After 1.e4 no black pawn can capture on e3, so the square is dropped.
-        let pos: Position = BLACK_EN_PASSANT.parse().expect("valid FEN");
+        let pos: Position = BLACK_EN_PASSANT.parse().expect("FEN should be valid");
         assert_eq!(pos.en_passant(), None);
         assert_eq!(pos.to_fen(), BLACK_EN_PASSANT.replace(" e3 ", " - "));
         // With a black pawn on d4 it's kept.
         let fen = "rnbqkbnr/ppp1pppp/8/8/3pP3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 3";
         assert_eq!(Position::from_fen(fen).map(|pos| pos.en_passant()), Ok(Some(Square::E3)));
         // A pawn is next to it, but capturing would expose the king to the rook on h5.
-        let pos: Position = "8/8/8/K2pP2r/8/8/8/7k w - d6 0 1".parse().expect("valid FEN");
+        let pos: Position =
+            "8/8/8/K2pP2r/8/8/8/7k w - d6 0 1".parse().expect("FEN should be valid");
         assert_eq!(pos.en_passant(), None);
         // The pawn that double-pushed gives check and capturing it is legal.
-        let pos: Position = "8/8/8/3pP3/4K3/8/8/7k w - d6 0 1".parse().expect("valid FEN");
+        let pos: Position =
+            "8/8/8/3pP3/4K3/8/8/7k w - d6 0 1".parse().expect("FEN should be valid");
         assert_eq!(pos.en_passant(), Some(Square::D6));
     }
 
     #[test]
     fn parses_en_passant_and_clocks() {
-        let pos: Position = EN_PASSANT.parse().expect("valid FEN");
+        let pos: Position = EN_PASSANT.parse().expect("FEN should be valid");
         assert_eq!(pos.en_passant(), Some(Square::F6));
         assert_eq!(pos.fullmove_number(), 3);
 
-        let pos: Position = ENDGAME.parse().expect("valid FEN");
+        let pos: Position = ENDGAME.parse().expect("FEN should be valid");
         assert_eq!(pos.side_to_move(), Color::Black);
         assert_eq!(pos.castling_rights(), CastlingRights::NONE);
         assert_eq!(pos.halfmove_clock(), 12);
@@ -399,7 +403,8 @@ mod tests {
 
     #[test]
     fn move_counters_are_optional() {
-        let pos = Position::from_fen("4k3/8/8/8/8/8/8/4K3 b - -").expect("valid 4-field FEN");
+        let pos =
+            Position::from_fen("4k3/8/8/8/8/8/8/4K3 b - -").expect("4-field FEN should be valid");
         assert_eq!(pos.side_to_move(), Color::Black);
         assert_eq!(pos.halfmove_clock(), 0);
         assert_eq!(pos.fullmove_number(), 1);
@@ -458,7 +463,8 @@ mod tests {
             )
         );
         // Rights whose pieces are home are kept; others may be absent.
-        let pos = Position::from_fen("r3k3/8/8/8/8/8/8/4K2R w Kq - 0 1").expect("valid FEN");
+        let pos =
+            Position::from_fen("r3k3/8/8/8/8/8/8/4K2R w Kq - 0 1").expect("FEN should be valid");
         assert_eq!(
             pos.castling_rights(),
             CastlingRights::WHITE_KINGSIDE.with(CastlingRights::BLACK_QUEENSIDE)

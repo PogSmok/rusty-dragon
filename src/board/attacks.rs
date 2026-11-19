@@ -358,9 +358,9 @@ mod tests {
     }
 
     /// CI sets `RUSTY_DRAGON_EXPECTED_SLIDER_BACKEND` so a misconfigured matrix row
-    /// can't silently test the wrong slider backend.
+    /// cannot silently test the wrong slider backend.
     ///
-    /// No-op on local builds.
+    /// Has no effect on local builds.
     #[test]
     fn slider_backend_matches_ci_expectation() {
         let active = if cfg!(pext) { "pext" } else { "magic" };

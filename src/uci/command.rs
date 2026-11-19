@@ -7,6 +7,7 @@ use std::str::{FromStr, SplitWhitespace};
 use std::time::Duration;
 
 use crate::board::Color;
+use crate::search::Limits;
 
 /// A command from the GUI. Arguments borrow from the input line.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -48,45 +49,43 @@ pub enum Command<'a> {
     Eval,
 }
 
-/// Search limits of a `go` command. A limit left out is `None`, or `false`/empty.
+/// Arguments of a `go` command.
 #[derive(Clone, Default, PartialEq, Eq, Debug)]
 pub struct Go<'a> {
-    /// Only search these root moves, in UCI notation.
+    /// Only search these root moves, in UCI notation, still to be checked for legality.
     pub searchmoves: Vec<&'a str>,
     /// Search the position after the predicted reply while the opponent thinks.
     pub ponder: bool,
-    /// Time left on each side's clock, indexed by `Color`. Negative times are clamped to 0.
-    pub time: [Option<Duration>; 2],
-    /// Increment per move for each side, indexed by `Color`.
-    pub inc: [Option<Duration>; 2],
-    /// Moves until the next time control.
-    pub movestogo: Option<u32>,
-    /// Search this many plies deep.
-    pub depth: Option<u32>,
-    /// Search at most this many nodes.
-    pub nodes: Option<u64>,
-    /// Search for a mate in this many moves.
-    pub mate: Option<u32>,
-    /// Search exactly this long.
-    pub movetime: Option<Duration>,
-    /// Search until `stop`.
-    pub infinite: bool,
+    /// Every other limit.
+    pub limits: Limits,
 }
 
 /// Every keyword of `go` (besides the leading `perft`), which ends a `searchmoves` list.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum GoKeyword {
+    /// `searchmoves <moves>`: search only these root moves.
     SearchMoves,
+    /// `ponder`: think on the opponent's time, until `ponderhit` or `stop`.
     Ponder,
+    /// `wtime <ms>`: White's time left.
     WTime,
+    /// `btime <ms>`: Black's time left.
     BTime,
+    /// `winc <ms>`: White's increment per move.
     WInc,
+    /// `binc <ms>`: Black's increment per move.
     BInc,
+    /// `movestogo <moves>`: moves until the next time control.
     MovesToGo,
+    /// `depth <plies>`: search this many plies deep at most.
     Depth,
+    /// `nodes <count>`: search this many nodes at most.
     Nodes,
+    /// `mate <moves>`: stop once a mate in at most this many moves is found.
     Mate,
+    /// `movetime <ms>`: search for exactly this duration.
     MoveTime,
+    /// `infinite`: ignore the clock; only `stop` or another limit ends the search.
     Infinite,
 }
 
@@ -219,6 +218,7 @@ fn parse_go(args: &str) -> Result<Command<'_>, ParseError<'_>> {
     }
 
     let mut go = Go::default();
+    let limits = &mut go.limits;
     let (white, black) = (Color::White.index(), Color::Black.index());
     while let Some(token) = tokens.next() {
         let Ok(keyword) = token.parse::<GoKeyword>() else { continue };
@@ -229,16 +229,16 @@ fn parse_go(args: &str) -> Result<Command<'_>, ParseError<'_>> {
                 }
             }
             GoKeyword::Ponder => go.ponder = true,
-            GoKeyword::WTime => go.time[white] = millis(&mut tokens),
-            GoKeyword::BTime => go.time[black] = millis(&mut tokens),
-            GoKeyword::WInc => go.inc[white] = millis(&mut tokens),
-            GoKeyword::BInc => go.inc[black] = millis(&mut tokens),
-            GoKeyword::MovesToGo => go.movestogo = number(&mut tokens),
-            GoKeyword::Depth => go.depth = number(&mut tokens),
-            GoKeyword::Nodes => go.nodes = number(&mut tokens),
-            GoKeyword::Mate => go.mate = number(&mut tokens),
-            GoKeyword::MoveTime => go.movetime = millis(&mut tokens),
-            GoKeyword::Infinite => go.infinite = true,
+            GoKeyword::WTime => limits.time[white] = millis(&mut tokens),
+            GoKeyword::BTime => limits.time[black] = millis(&mut tokens),
+            GoKeyword::WInc => limits.inc[white] = millis(&mut tokens),
+            GoKeyword::BInc => limits.inc[black] = millis(&mut tokens),
+            GoKeyword::MovesToGo => limits.movestogo = number(&mut tokens),
+            GoKeyword::Depth => limits.depth = number(&mut tokens),
+            GoKeyword::Nodes => limits.nodes = number(&mut tokens),
+            GoKeyword::Mate => limits.mate = number(&mut tokens),
+            GoKeyword::MoveTime => limits.movetime = millis(&mut tokens),
+            GoKeyword::Infinite => limits.infinite = true,
         }
     }
     Ok(Command::Go(go))
@@ -417,38 +417,39 @@ mod tests {
 
     #[test]
     fn go_clocks() {
-        let go = go("go wtime 300000 btime -50 winc 2000 binc 2000 movestogo 40");
+        let limits = go("go wtime 300000 btime -50 winc 2000 binc 2000 movestogo 40").limits;
         let (white, black) = (Color::White.index(), Color::Black.index());
-        assert_eq!(go.time[white], Some(Duration::from_secs(300)));
-        assert_eq!(go.time[black], Some(Duration::ZERO), "negative times clamp to 0");
-        assert_eq!(go.inc, [Some(Duration::from_secs(2)); 2]);
-        assert_eq!(go.movestogo, Some(40));
+        assert_eq!(limits.time[white], Some(Duration::from_secs(300)));
+        assert_eq!(limits.time[black], Some(Duration::ZERO), "negative times must clamp to 0");
+        assert_eq!(limits.inc, [Some(Duration::from_secs(2)); 2]);
+        assert_eq!(limits.movestogo, Some(40));
     }
 
     #[test]
     fn go_fixed_limits() {
         let go = go("go depth 12 nodes 1000000 mate 3 movetime 500 ponder infinite");
-        assert_eq!(go.depth, Some(12));
-        assert_eq!(go.nodes, Some(1_000_000));
-        assert_eq!(go.mate, Some(3));
-        assert_eq!(go.movetime, Some(Duration::from_millis(500)));
-        assert!(go.ponder && go.infinite);
+        let limits = &go.limits;
+        assert_eq!(limits.depth, Some(12));
+        assert_eq!(limits.nodes, Some(1_000_000));
+        assert_eq!(limits.mate, Some(3));
+        assert_eq!(limits.movetime, Some(Duration::from_millis(500)));
+        assert!(go.ponder && limits.infinite);
     }
 
     #[test]
     fn go_searchmoves_end_at_the_next_keyword() {
         let go = go("go searchmoves e2e4 d2d4 depth 5");
         assert_eq!(go.searchmoves, ["e2e4", "d2d4"]);
-        assert_eq!(go.depth, Some(5));
+        assert_eq!(go.limits.depth, Some(5));
     }
 
     #[test]
     fn go_ignores_bad_values_without_losing_keywords() {
-        let go = go("go depth infinite nodes -3 foo movetime 10");
-        assert_eq!(go.depth, None);
-        assert!(go.infinite);
-        assert_eq!(go.nodes, None);
-        assert_eq!(go.movetime, Some(Duration::from_millis(10)));
+        let limits = go("go depth infinite nodes -3 foo movetime 10").limits;
+        assert_eq!(limits.depth, None);
+        assert!(limits.infinite);
+        assert_eq!(limits.nodes, None);
+        assert_eq!(limits.movetime, Some(Duration::from_millis(10)));
     }
 
     #[test]

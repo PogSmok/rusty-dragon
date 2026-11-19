@@ -61,6 +61,19 @@ impl Castle {
             Color::Black => [Self::BLACK_KINGSIDE, Self::BLACK_QUEENSIDE],
         }
     }
+
+    /// `color`'s castle whose king lands on `king_to`.
+    ///
+    /// If `king_to` does not match the kingside castle for `color`, the function returns queenside.
+    /// For example, `landing_on(Color::White, Square::D5)` returns `Castle::WHITE_QUEENSIDE`.
+    /// The fallback keeps the function branch-free.
+    /// A caller holding an untrusted move must check that the move matches the resulting castle.
+    #[inline]
+    #[must_use]
+    pub fn landing_on(color: Color, king_to: Square) -> Self {
+        let [kingside, queenside] = Self::of(color);
+        if king_to == kingside.king_to { kingside } else { queenside }
+    }
 }
 
 /// Set of the four castling rights, one bit each.

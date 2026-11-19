@@ -1,4 +1,4 @@
-//! Perft: counting the leaf nodes of the legal move tree to a fixed depth.
+//! Perft (performance test): counting the leaf nodes of the legal move tree to a fixed depth.
 
 use std::error::Error;
 use std::fmt;
@@ -153,7 +153,7 @@ pub fn parallel_divide(
             .collect();
         handles
             .into_iter()
-            .map(|handle| handle.join().expect("perft worker panicked"))
+            .map(|handle| handle.join().expect("perft workers should not panic"))
             .collect::<Result<_, _>>()
     })?;
 
@@ -216,13 +216,17 @@ mod tests {
         let split = divide(&pos, 3);
         assert_eq!(split.moves.len(), 20);
         assert_eq!(split.nodes, 8_902);
-        let e2e4 = split.moves.iter().find(|(mv, _)| mv.to_string() == "e2e4").expect("legal");
+        let e2e4 = split
+            .moves
+            .iter()
+            .find(|(mv, _)| mv.to_string() == "e2e4")
+            .expect("e2e4 should be a root move");
         assert_eq!(e2e4.1, 600);
     }
 
     #[test]
     fn parallel_matches_sequential() {
-        let pos = Position::from_fen(KIWIPETE).expect("valid FEN");
+        let pos = Position::from_fen(KIWIPETE).expect("FEN should be valid");
         // Below, at, and above the depth where the tree starts being split.
         for depth in 0..=SPLIT_PLIES + 2 {
             assert_eq!(parallel_divide(&pos, depth, &never()), Ok(divide(&pos, depth)), "{depth}");
@@ -241,7 +245,7 @@ mod tests {
 
     #[test]
     fn perft_until_checks_stop_inside_a_job() {
-        let pos = Position::from_fen(KIWIPETE).expect("valid FEN");
+        let pos = Position::from_fen(KIWIPETE).expect("FEN should be valid");
         let depth = STOP_CHECK_DEPTH + 1;
         assert_eq!(perft_until(&pos, depth, &AtomicBool::new(true)), Err(PerftError::Stopped));
         assert_eq!(perft_until(&pos, depth, &never()), Ok(perft(&pos, depth)));
@@ -255,7 +259,8 @@ mod tests {
 
     #[test]
     fn display_lists_root_moves_then_the_total() {
-        let pos = Position::from_fen("4k3/8/8/8/8/8/8/R3K3 w - - 0 1").expect("valid FEN");
+        let pos =
+            Position::from_fen("4k3/8/8/8/8/8/8/R3K3 w - - 0 1").expect("FEN should be valid");
         let text = divide(&pos, 1).to_string();
         // 10 rook moves and 5 king moves, one line each, in move generation order.
         assert_eq!(text.lines().count(), 15 + 2, "{text}");
