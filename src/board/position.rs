@@ -11,6 +11,7 @@ mod make_move;
 mod movegen;
 
 pub use fen::FenError;
+pub use movegen::{CheckInfo, MoveGenerator};
 
 /// Each side starts with 16 pieces, and none can be added.
 ///
@@ -34,7 +35,9 @@ pub struct Position {
     ///
     /// Right after `by_kind`, since `pieces(color, kind)` reads both.
     by_color: [Bitboard; 2],
-    /// Material and piece-square total from White's view. Kept in sync by the board writes.
+    /// Material and PSQT (piece-square table) total from White's view.
+    ///
+    /// Kept in sync by the board writes.
     psqt: Tapered,
     side_to_move: Color,
     castling_rights: CastlingRights,
@@ -73,10 +76,10 @@ impl Position {
     /// Puts `piece` on the empty square `square`.
     #[inline]
     fn put_piece(&mut self, square: Square, piece: Piece) {
-        debug_assert!(self.board_mailbox[square.index()].is_none(), "square already occupied");
+        debug_assert!(self.board_mailbox[square.index()].is_none(), "square must be empty");
         debug_assert!(
             self.by_color[piece.color().index()].popcount() < MAX_PIECES_PER_SIDE,
-            "a side would have more than {MAX_PIECES_PER_SIDE} pieces"
+            "a side must not have more than {MAX_PIECES_PER_SIDE} pieces"
         );
 
         let bb = Bitboard::from_square(square);
@@ -109,9 +112,10 @@ impl Position {
     /// Moves the piece on `from` to the empty square `to`.
     #[inline]
     fn move_piece(&mut self, from: Square, to: Square) {
-        debug_assert!(self.board_mailbox[to.index()].is_none(), "destination already occupied");
+        debug_assert!(self.board_mailbox[to.index()].is_none(), "destination must be empty");
 
-        let piece = self.board_mailbox[from.index()].take().expect("no piece on source square");
+        let piece =
+            self.board_mailbox[from.index()].take().expect("the source square should hold a piece");
         let mask = Bitboard::from_square(from) | Bitboard::from_square(to);
         self.by_color[piece.color().index()] ^= mask;
         self.by_kind[piece.kind().index()] ^= mask;
@@ -190,9 +194,9 @@ impl Position {
     /// computed from scratch.
     fn assert_incremental_current(&self) {
         let fresh = self.compute_incremental();
-        assert_eq!(self.zobrist_key, fresh.zobrist_key, "Zobrist key is out of date");
-        assert_eq!(self.psqt, fresh.psqt, "piece-square total is out of date");
-        assert_eq!(self.phase, fresh.phase, "phase is out of date");
+        assert_eq!(self.zobrist_key, fresh.zobrist_key, "Zobrist key must be up to date");
+        assert_eq!(self.psqt, fresh.psqt, "piece-square total must be up to date");
+        assert_eq!(self.phase, fresh.phase, "phase must be up to date");
     }
 
     /// Panics if the bitboards and the mailbox disagree about `square`.
@@ -203,10 +207,10 @@ impl Position {
             let matches = self.pieces(piece.color(), piece.kind()).contains(square);
             assert!(
                 colors == 1 && kinds == 1 && matches,
-                "{square}: mailbox has {piece:?}, bitboards don't"
+                "{square}: bitboards must match the mailbox's {piece:?}"
             );
         } else {
-            assert!(colors == 0 && kinds == 0, "{square}: mailbox is empty, bitboards aren't");
+            assert!(colors == 0 && kinds == 0, "{square}: bitboards must match the empty mailbox");
         }
     }
 
@@ -220,19 +224,43 @@ impl Position {
         self.assert_incremental_current();
     }
 
+    /// Pieces of color `by` that attack `square`, with `occupied` as the blockers.
     #[inline]
     pub fn attackers(&self, square: Square, by: Color, occupied: Bitboard) -> Bitboard {
-        let queens = self.pieces_of_kind(PieceKind::Queen);
-        let diagonal = self.pieces_of_kind(PieceKind::Bishop) | queens;
-        let straight = self.pieces_of_kind(PieceKind::Rook) | queens;
         // A pawn `by` attacks `square` iff a pawn of the other color on `square` attacks it back.
         let attackers = (pawn_attacks(by.opposite(), square)
             & self.pieces_of_kind(PieceKind::Pawn))
-            | (knight_attacks(square) & self.pieces_of_kind(PieceKind::Knight))
-            | (king_attacks(square) & self.pieces_of_kind(PieceKind::King))
-            | (bishop_attacks(square, occupied) & diagonal)
-            | (rook_attacks(square, occupied) & straight);
+            | self.piece_attackers_to(square, occupied);
         attackers & self.pieces_of_color(by)
+    }
+
+    /// Pieces of either color that attack `square`, with `occupied` as the blockers.
+    #[inline]
+    pub fn attackers_to(&self, square: Square, occupied: Bitboard) -> Bitboard {
+        let pawns =
+            |color| pawn_attacks(color, square) & self.pieces(color.opposite(), PieceKind::Pawn);
+        pawns(Color::White) | pawns(Color::Black) | self.piece_attackers_to(square, occupied)
+    }
+
+    /// Knights, bishops, rooks, queens and kings of either color that attack `square`.
+    #[inline]
+    fn piece_attackers_to(&self, square: Square, occupied: Bitboard) -> Bitboard {
+        (knight_attacks(square) & self.pieces_of_kind(PieceKind::Knight))
+            | (king_attacks(square) & self.pieces_of_kind(PieceKind::King))
+            | (bishop_attacks(square, occupied) & self.diagonal_sliders())
+            | (rook_attacks(square, occupied) & self.straight_sliders())
+    }
+
+    /// Bishops and queens of both colors: the pieces that slide along diagonals.
+    #[inline]
+    pub const fn diagonal_sliders(&self) -> Bitboard {
+        self.pieces_of_kind(PieceKind::Bishop).union(self.pieces_of_kind(PieceKind::Queen))
+    }
+
+    /// Rooks and queens of both colors: the pieces that slide along ranks and files.
+    #[inline]
+    pub const fn straight_sliders(&self) -> Bitboard {
+        self.pieces_of_kind(PieceKind::Rook).union(self.pieces_of_kind(PieceKind::Queen))
     }
 
     /// Whether any piece of color `by` attacks `square`.
@@ -246,7 +274,7 @@ impl Position {
     #[inline]
     #[expect(clippy::missing_panics_doc, reason = "every position has a king per side")]
     pub fn king_square(&self, color: Color) -> Square {
-        self.pieces(color, PieceKind::King).lsb().expect("each side has a king")
+        self.pieces(color, PieceKind::King).lsb().expect("each side should have a king")
     }
 
     /// Whether the side to move is in check.
@@ -365,6 +393,7 @@ impl Position {
 
 struct Incremental {
     zobrist_key: u64,
+    /// PSQT (piece-square table) total.
     psqt: Tapered,
     phase: u8,
 }
@@ -414,7 +443,7 @@ mod tests {
     #[test]
     fn insufficient_material() {
         let insufficient =
-            |fen| Position::from_fen(fen).expect("valid FEN").is_insufficient_material();
+            |fen| Position::from_fen(fen).expect("FEN should be valid").is_insufficient_material();
         assert!(insufficient("4k3/8/8/8/8/8/8/4K3 w - - 0 1"));
         assert!(insufficient("4k3/8/8/8/8/8/8/2B1K3 w - - 0 1"));
         assert!(insufficient("4k3/8/8/8/8/8/8/2N1K3 b - - 0 1"));
@@ -478,14 +507,14 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "no piece on source square")]
+    #[should_panic(expected = "the source square should hold a piece")]
     fn move_piece_from_empty_square_panics() {
         let mut pos = Position::EMPTY;
         pos.move_piece(Square::E2, Square::E4);
     }
 
     #[test]
-    #[should_panic(expected = "mailbox is empty, bitboards aren't")]
+    #[should_panic(expected = "bitboards must match the empty mailbox")]
     fn assert_consistent_detects_corruption() {
         let mut pos = Position::EMPTY;
         pos.by_kind[PieceKind::Queen.index()] = Bitboard::from_square(Square::D1);

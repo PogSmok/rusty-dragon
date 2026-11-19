@@ -27,6 +27,6 @@ pub use move_list::MoveList;
 pub use piece::Piece;
 pub use piece_kind::PieceKind;
 pub(crate) use position::MAX_PIECES_PER_SIDE;
-pub use position::{FenError, Position};
+pub use position::{CheckInfo, FenError, MoveGenerator, Position};
 pub use rank::Rank;
 pub use square::{ParseSquareError, Square};

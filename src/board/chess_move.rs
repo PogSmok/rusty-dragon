@@ -72,9 +72,27 @@ impl Move {
     const TO_SHIFT: u32 = 6;
     const KIND_SHIFT: u32 = 12;
 
+    /// `a1a1`, a placeholder for "no move" where an `Option` would cost space.
+    ///
+    /// No legal move has the same source and destination.
+    pub const NULL: Self = Self(0);
+
     #[inline]
     pub const fn new(from: Square, to: Square, kind: MoveKind) -> Self {
         Self(from as u16 | (to as u16) << Self::TO_SHIFT | (kind as u16) << Self::KIND_SHIFT)
+    }
+
+    /// The 16-bit encoding, for storing the move compactly.
+    #[inline]
+    #[must_use]
+    pub const fn to_bits(self) -> u16 {
+        self.0
+    }
+
+    /// The move [`Move::to_bits`] encoded.
+    #[inline]
+    pub const fn from_bits(bits: u16) -> Self {
+        Self(bits)
     }
 
     #[inline]
@@ -126,6 +144,20 @@ impl Move {
             return None;
         }
         Some(PieceKind::from_index(PieceKind::Knight.index() + (flag & 0b11) as usize))
+    }
+
+    /// The square of the pawn an en passant capture takes. `self` must be en passant.
+    #[inline]
+    pub const fn en_passant_victim(self) -> Square {
+        debug_assert!(self.is_en_passant(), "move must be en passant");
+        Square::from_file_rank(self.to().file(), self.from().rank())
+    }
+
+    /// Whether the move changes material: a capture (en passant included) or a promotion.
+    #[inline]
+    #[must_use]
+    pub const fn is_tactical(self) -> bool {
+        self.flag() & (MoveKind::CAPTURE_BIT | MoveKind::PROMOTION_BIT) != 0
     }
 }
 
@@ -199,6 +231,18 @@ mod tests {
                     | QueenPromotionCapture
             );
             assert_eq!(mv.is_capture(), capture, "{kind:?}");
+            let promotion = matches!(
+                kind,
+                KnightPromotion
+                    | BishopPromotion
+                    | RookPromotion
+                    | QueenPromotion
+                    | KnightPromotionCapture
+                    | BishopPromotionCapture
+                    | RookPromotionCapture
+                    | QueenPromotionCapture
+            );
+            assert_eq!(mv.is_tactical(), capture || promotion, "{kind:?}");
             assert_eq!(mv.is_en_passant(), kind == EnPassant, "{kind:?}");
             assert_eq!(mv.is_double_push(), kind == DoublePush, "{kind:?}");
             assert_eq!(
@@ -207,6 +251,15 @@ mod tests {
                 "{kind:?}"
             );
         }
+    }
+
+    #[test]
+    fn bits_round_trip() {
+        for kind in ALL_KINDS {
+            let mv = Move::new(Square::B7, Square::A8, kind);
+            assert_eq!(Move::from_bits(mv.to_bits()), mv);
+        }
+        assert_eq!(Move::NULL.from(), Move::NULL.to());
     }
 
     #[test]

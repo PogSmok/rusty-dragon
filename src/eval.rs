@@ -1,6 +1,6 @@
 //! Static evaluation
 //!
-//! The evaluation is PeSTO's tapered material and piece-square tables.
+//! The evaluation is PeSTO's (Piece-Square Tables Only) tapered material and piece-square tables.
 
 mod psqt;
 mod score;
@@ -18,6 +18,12 @@ pub use psqt::MAX_PHASE;
 /// The position's score for the side to move.
 pub fn evaluate(pos: &Position) -> Score {
     score(pos, phase(pos), pos.is_insufficient_material())
+}
+
+/// [`evaluate`] for a position known to have enough material for a mate
+pub fn evaluate_sufficient(pos: &Position) -> Score {
+    debug_assert!(!pos.is_insufficient_material(), "position must have enough material for a mate");
+    score(pos, phase(pos), false)
 }
 
 fn score(pos: &Position, phase: i32, insufficient_material: bool) -> Score {
@@ -49,7 +55,7 @@ fn blend(psqt: Tapered, phase: i32) -> Score {
 /// How [`evaluate`] reached its score, for debugging the tables.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Breakdown {
-    /// Material and piece-square total, from White's view.
+    /// Material and PSQT (piece-square table) total, from White's view.
     pub psqt: Tapered,
     /// From 0, bare kings and pawns, to the starting material's [`MAX_PHASE`].
     pub phase: i32,
@@ -89,7 +95,7 @@ mod tests {
     };
 
     fn eval(fen: &str) -> Score {
-        evaluate(&Position::from_fen(fen).expect("valid FEN"))
+        evaluate(&Position::from_fen(fen).expect("FEN should be valid"))
     }
 
     /// `fen` with the board turned upside down and the colors swapped
@@ -144,7 +150,7 @@ mod tests {
     #[test]
     fn mirrored_positions_score_the_same() {
         for fen in [STARTPOS, KIWIPETE, POSITION_3, POSITION_4, POSITION_5, POSITION_6] {
-            check_symmetry(&Position::from_fen(fen).expect("valid FEN"), 2);
+            check_symmetry(&Position::from_fen(fen).expect("FEN should be valid"), 2);
         }
         assert_eq!(eval(MOST_LEGAL_MOVES), eval(&mirror(MOST_LEGAL_MOVES)));
     }
@@ -168,11 +174,14 @@ mod tests {
     fn phase_tapers_from_middlegame_to_endgame() {
         let start = Position::startpos();
         assert_eq!(phase(&start), MAX_PHASE);
-        let kings_and_pawns =
-            Position::from_fen("4k3/pppp4/8/8/8/8/PPPP4/4K3 w - - 0 1").expect("valid FEN");
+        let kings_and_pawns = Position::from_fen("4k3/pppp4/8/8/8/8/PPPP4/4K3 w - - 0 1")
+            .expect("FEN should be valid");
         assert_eq!(phase(&kings_and_pawns), 0);
         // Nine queens can't push the phase past the cap.
-        assert_eq!(phase(&Position::from_fen(MOST_LEGAL_MOVES).expect("valid FEN")), MAX_PHASE);
+        assert_eq!(
+            phase(&Position::from_fen(MOST_LEGAL_MOVES).expect("FEN should be valid")),
+            MAX_PHASE
+        );
 
         let psqt = Tapered::new(100, -40);
         assert_eq!(blend(psqt, MAX_PHASE), Score::new(100));
@@ -188,15 +197,20 @@ mod tests {
         // Bishops all on light squares can never mate.
         let same_color_bishops = "2b1k3/8/8/8/8/8/8/4KB2 w - - 0 1";
         assert_eq!(eval(same_color_bishops), Score::DRAW);
-        let breakdown = Breakdown::of(&Position::from_fen(same_color_bishops).expect("valid"));
+        let breakdown =
+            Breakdown::of(&Position::from_fen(same_color_bishops).expect("FEN should be valid"));
         assert_eq!(breakdown.score, Score::DRAW);
         assert!(breakdown.to_string().contains("Insufficient material: draw"));
     }
 
     #[test]
     fn breakdown_shows_each_step() {
-        let breakdown = Breakdown::of(&Position::from_fen(FOOLS_MATE).expect("valid FEN"));
-        assert_eq!(breakdown.score, evaluate(&Position::from_fen(FOOLS_MATE).expect("valid")));
+        let breakdown =
+            Breakdown::of(&Position::from_fen(FOOLS_MATE).expect("FEN should be valid"));
+        assert_eq!(
+            breakdown.score,
+            evaluate(&Position::from_fen(FOOLS_MATE).expect("FEN should be valid"))
+        );
         let text = breakdown.to_string();
         assert!(text.contains("Phase: 24/24"), "{text}");
         assert!(text.ends_with(&format!("Evaluation: {} (side to move)", breakdown.score)));

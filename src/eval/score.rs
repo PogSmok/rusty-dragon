@@ -47,22 +47,32 @@ impl Score {
     pub const fn new(centipawns: i32) -> Self {
         debug_assert!(
             -Self::MAX_EVAL.0 <= centipawns && centipawns <= Self::MAX_EVAL.0,
-            "evaluation out of range"
+            "evaluation must be within `MAX_EVAL`"
         );
         Self(centipawns)
+    }
+
+    /// A score from its raw [`Score::value`], in any band, within [`Score::INFINITE`].
+    #[inline]
+    pub const fn from_value(value: i32) -> Self {
+        debug_assert!(
+            -Self::INFINITE.0 <= value && value <= Self::INFINITE.0,
+            "score must be within `INFINITE`"
+        );
+        Self(value)
     }
 
     /// The side to move mates in `ply` plies, at least 1: it has to move to mate.
     #[inline]
     pub const fn mate_in(ply: i32) -> Self {
-        debug_assert!(1 <= ply && ply <= Self::MAX_PLY, "mate distance out of range");
+        debug_assert!(1 <= ply && ply <= Self::MAX_PLY, "mate distance must be in `1..=MAX_PLY`");
         Self(Self::MATE.0 - ply)
     }
 
     /// The side to move is mated in `ply` plies: 0 if it is checkmated now.
     #[inline]
     pub const fn mated_in(ply: i32) -> Self {
-        debug_assert!(0 <= ply && ply <= Self::MAX_PLY, "mate distance out of range");
+        debug_assert!(0 <= ply && ply <= Self::MAX_PLY, "mate distance must be in `0..=MAX_PLY`");
         Self(-Self::MATE.0 + ply)
     }
 

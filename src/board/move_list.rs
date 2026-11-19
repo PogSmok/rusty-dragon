@@ -6,41 +6,62 @@ use std::str;
 
 use super::{Move, PieceKind, Square};
 
-/// Fixed-capacity move buffer, so move generation never allocates.
+/// Most legal moves a chess position has, 218, rounded up.
+const DEFAULT_CAPACITY: usize = 256;
+
+/// A list of up to `N` moves, stored inline so it never allocates.
 ///
 /// Slots past `len` stay uninitialized.
 #[must_use]
-pub struct MoveList {
-    moves: [MaybeUninit<Move>; Self::CAPACITY],
+pub struct MoveList<const N: usize = DEFAULT_CAPACITY> {
+    moves: [MaybeUninit<Move>; N],
     /// Number of initialized moves at the front of `moves`.
     len: usize,
 }
 
 impl MoveList {
-    /// Chess positions can never have more than 218 legal moves.
-    pub const CAPACITY: usize = 256;
+    /// Room for every legal move of any position.
+    pub const CAPACITY: usize = DEFAULT_CAPACITY;
 
+    /// An empty list of the default capacity.
     #[inline]
     pub const fn new() -> Self {
-        Self { moves: [const { MaybeUninit::uninit() }; Self::CAPACITY], len: 0 }
+        Self::empty()
+    }
+}
+
+impl<const N: usize> MoveList<N> {
+    /// An empty list of any capacity.
+    #[inline]
+    pub const fn empty() -> Self {
+        Self { moves: [const { MaybeUninit::uninit() }; N], len: 0 }
     }
 
     /// Appends `mv`.
     ///
     /// # Panics
     ///
-    /// Panics if the list is full, which no legal position can cause.
+    /// Panics if the list is full.
     #[inline]
     pub fn push(&mut self, mv: Move) {
         self.moves[self.len].write(mv);
         self.len += 1;
     }
 
+    /// Appends `mv` if there is room. Returns whether there was.
+    #[inline]
+    pub fn try_push(&mut self, mv: Move) -> bool {
+        let Some(slot) = self.moves.get_mut(self.len) else { return false };
+        slot.write(mv);
+        self.len += 1;
+        true
+    }
+
     /// Appends every move in `other`, in order.
     ///
     /// # Panics
     ///
-    /// Panics if they don't fit, which no legal position can cause.
+    /// Panics if they do not all fit.
     #[inline]
     pub fn append(&mut self, other: &Self) {
         let end = self.len + other.len;
@@ -53,6 +74,13 @@ impl MoveList {
     pub fn as_slice(&self) -> &[Move] {
         // SAFETY: the first `len` slots are initialized.
         unsafe { slice::from_raw_parts(self.moves.as_ptr().cast::<Move>(), self.len) }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn as_mut_slice(&mut self) -> &mut [Move] {
+        // SAFETY: the first `len` slots are initialized, and `self` is borrowed mutably.
+        unsafe { slice::from_raw_parts_mut(self.moves.as_mut_ptr().cast::<Move>(), self.len) }
     }
 
     /// The move in the list written in UCI notation, e.g. `e2e4`, `e1g1` or `e7e8q`.
@@ -79,22 +107,22 @@ impl MoveList {
 }
 
 /// Copies only the moves, not the whole buffer.
-impl Clone for MoveList {
+impl<const N: usize> Clone for MoveList<N> {
     #[inline]
     fn clone(&self) -> Self {
-        let mut copy = Self::new();
+        let mut copy = Self::empty();
         copy.append(self);
         copy
     }
 }
 
-impl Default for MoveList {
+impl<const N: usize> Default for MoveList<N> {
     fn default() -> Self {
-        Self::new()
+        Self::empty()
     }
 }
 
-impl Deref for MoveList {
+impl<const N: usize> Deref for MoveList<N> {
     type Target = [Move];
 
     #[inline]
@@ -103,7 +131,7 @@ impl Deref for MoveList {
     }
 }
 
-impl<'a> IntoIterator for &'a MoveList {
+impl<'a, const N: usize> IntoIterator for &'a MoveList<N> {
     type Item = &'a Move;
     type IntoIter = slice::Iter<'a, Move>;
 
@@ -113,7 +141,7 @@ impl<'a> IntoIterator for &'a MoveList {
     }
 }
 
-impl fmt::Debug for MoveList {
+impl<const N: usize> fmt::Debug for MoveList<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.as_slice()).finish()
     }
@@ -189,6 +217,15 @@ mod tests {
         let mut one = MoveList::new();
         one.push(Move::new(Square::E2, Square::E4, MoveKind::Quiet));
         full.append(&one);
+    }
+
+    #[test]
+    fn try_push_stops_at_capacity() {
+        let mut small = MoveList::<2>::empty();
+        let mv = Move::new(Square::E2, Square::E4, MoveKind::Quiet);
+        assert!(small.try_push(mv) && small.try_push(mv));
+        assert!(!small.try_push(mv));
+        assert_eq!(small.len(), 2);
     }
 
     #[test]
