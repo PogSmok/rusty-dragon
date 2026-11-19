@@ -137,6 +137,10 @@ jobs:
           # Captured first, so a crash or timeout fails the step instead of being hidden by grep.
           out=$(timeout 60 ./target/release/rusty-dragon perft 4)
           grep -qx 'Nodes searched: 197281' <<<"$out" || { echo "::error::wrong perft 4 count"; exit 1; }
+          out=$(timeout 120 ./target/release/rusty-dragon bench)
+          echo "$out"
+          tail -n 1 <<<"$out" | grep -qxE '[0-9]+ nodes [0-9]+ nps' \
+            || { echo "::error::bench should end with \"<nodes> nodes <nps> nps\""; exit 1; }
 
   ci-ok:
     if: always()

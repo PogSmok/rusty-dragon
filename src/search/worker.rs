@@ -488,6 +488,7 @@ impl<'a> Worker<'a> {
 
     /// The best move and the reply expected, from the last finished iteration.
     pub(super) fn outcome(&self) -> Outcome {
+        self.shared.nodes[self.id].0.store(self.nodes, Ordering::Relaxed);
         let completed = self.completed.as_ref();
         let pv = completed.map_or(&[][..], |c| &c.pv);
         let best = pv.first().copied().or_else(|| self.shared.root_moves.first().copied());
@@ -497,6 +498,7 @@ impl<'a> Worker<'a> {
             ponder,
             score: completed.map(|c| Score::from_value(c.score)),
             depth: completed.map_or(0, |c| u32::try_from(c.depth).unwrap_or(0)),
+            nodes: self.total_nodes(),
         }
     }
 

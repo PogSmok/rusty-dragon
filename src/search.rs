@@ -344,6 +344,8 @@ pub struct Outcome {
     pub score: Option<Score>,
     /// Plies of the last finished iteration.
     pub depth: u32,
+    /// Nodes searched, counted over all threads.
+    pub nodes: u64,
 }
 
 /// Searches `pos` as `request` asks on every thread of `threads`,
@@ -368,7 +370,7 @@ pub fn search(
     let limits = &request.limits;
     let legal = pos.legal_moves();
     if legal.is_empty() {
-        return Outcome { best: None, ponder: None, score: None, depth: 0 };
+        return Outcome { best: None, ponder: None, score: None, depth: 0, nodes: 0 };
     }
     let mut root_moves = MoveList::new();
     for &mv in legal.iter().filter(|mv| request.searchmoves.contains(mv)) {
@@ -563,7 +565,7 @@ mod tests {
     #[test]
     fn no_legal_move_gives_no_move() {
         let (outcome, infos) = search_fen(FOOLS_MATE, &depth(3), 1);
-        assert_eq!(outcome, Outcome { best: None, ponder: None, score: None, depth: 0 });
+        assert_eq!(outcome, Outcome { best: None, ponder: None, score: None, depth: 0, nodes: 0 });
         assert_eq!(infos, []);
     }
 

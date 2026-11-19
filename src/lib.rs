@@ -1,5 +1,6 @@
 //! A UCI chess engine.
 
+pub mod bench;
 pub mod board;
 pub mod eval;
 pub mod perft;
